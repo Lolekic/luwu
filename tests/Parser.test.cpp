@@ -4162,6 +4162,120 @@ TEST_CASE_FIXTURE(Fixture, "class_public_function")
     REQUIRE(result.errors.empty());
 }
 
+TEST_CASE_FIXTURE(Fixture, "class_method_attributes")
+{
+    ScopedFastFlag sffs[] = {
+        {FFlag::DebugLuauUserDefinedClasses, true},
+        {FFlag::LuwuBetterUserDefinedClasses, true},
+    };
+
+    ParseResult result = tryParse(R"(
+        class Foo
+            @native
+            public function before() end
+
+            private @native function after() end
+
+            @native public function both_orders() end
+        end
+    )");
+
+    REQUIRE(result.errors.empty());
+
+    REQUIRE_EQ(result.root->body.size, 1);
+    const AstStatClass* cls = result.root->body.data[0]->as<AstStatClass>();
+    REQUIRE(cls);
+    REQUIRE(cls->members.size == 3);
+
+    for (size_t i = 0; i < cls->members.size; ++i)
+    {
+        const AstClassMethod* method = cls->members.data[i].get_if<AstClassMethod>();
+        REQUIRE(method);
+        CHECK(method->function->hasNativeAttribute());
+    }
+
+    // The access specifier is read the same way whichever side the attributes sit on.
+    CHECK(cls->members.data[0].get_if<AstClassMethod>()->visibility == AstClassMemberVisibility::Public);
+    CHECK(cls->members.data[1].get_if<AstClassMethod>()->visibility == AstClassMemberVisibility::Private);
+}
+
+TEST_CASE_FIXTURE(Fixture, "class_field_cannot_have_attributes")
+{
+    ScopedFastFlag sffs[] = {
+        {FFlag::DebugLuauUserDefinedClasses, true},
+        {FFlag::LuwuBetterUserDefinedClasses, true},
+    };
+
+    ParseResult result = tryParse(R"(
+        class Foo
+            @native
+            public x: number
+        end
+    )");
+
+    REQUIRE(!result.errors.empty());
+    CHECK_EQ(result.errors[0].getMessage(), "Expected 'function' after attribute, but got 'x' instead");
+
+    // The field itself still parses, so the rest of the class is not reported against.
+    REQUIRE_EQ(result.root->body.size, 1);
+    const AstStatClass* cls = result.root->body.data[0]->as<AstStatClass>();
+    REQUIRE(cls);
+    REQUIRE(cls->members.size == 1);
+    const AstClassProperty* prop = cls->members.data[0].get_if<AstClassProperty>();
+    REQUIRE(prop);
+    CHECK(prop->name == "x");
+}
+
+TEST_CASE_FIXTURE(Fixture, "class_attribute_with_no_member_does_not_swallow_end")
+{
+    ScopedFastFlag sffs[] = {
+        {FFlag::DebugLuauUserDefinedClasses, true},
+        {FFlag::LuwuBetterUserDefinedClasses, true},
+    };
+
+    ParseResult result = tryParse(R"(
+        class Foo
+            @native
+        end
+
+        local x = 1
+    )");
+
+    // One error, and the class still closes at its own `end`: the statement after it parses.
+    REQUIRE_EQ(result.errors.size(), 1);
+    CHECK_EQ(result.errors[0].getMessage(), "Expected 'function' after attribute, but got 'end' instead");
+
+    REQUIRE_EQ(result.root->body.size, 2);
+    CHECK(result.root->body.data[0]->is<AstStatClass>());
+    CHECK(result.root->body.data[1]->is<AstStatLocal>());
+}
+
+TEST_CASE_FIXTURE(Fixture, "class_method_attributes_cannot_straddle_access_specifier")
+{
+    ScopedFastFlag sffs[] = {
+        {FFlag::DebugLuauUserDefinedClasses, true},
+        {FFlag::LuwuBetterUserDefinedClasses, true},
+    };
+
+    ParseResult result = tryParse(R"(
+        class Foo
+            @native public @deprecated function bar() end
+        end
+    )");
+
+    REQUIRE(!result.errors.empty());
+    CHECK_EQ(result.errors[0].getMessage(), "Attributes on a class member must all be written on the same side of the access specifier");
+
+    // Both attributes are still kept on the method, so it behaves as written.
+    REQUIRE_EQ(result.root->body.size, 1);
+    const AstStatClass* cls = result.root->body.data[0]->as<AstStatClass>();
+    REQUIRE(cls);
+    REQUIRE(cls->members.size == 1);
+    const AstClassMethod* method = cls->members.data[0].get_if<AstClassMethod>();
+    REQUIRE(method);
+    CHECK(method->function->attributes.size == 2);
+}
+
 TEST_CASE_FIXTURE(Fixture, "class_recovery_invalid_body_token")
 {
     ScopedFastFlag sffs[] = {

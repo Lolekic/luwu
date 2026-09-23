@@ -410,6 +410,31 @@ expectpass("classes gracefully handle NCG", function()
     assert(fromncg.tier == "S" and fromncg.ordering == 4)
 end)
 
+-- A class method takes attributes like any other function, on either side of the access specifier.
+class NativeRanked
+    private const tier: string
+    public ordering: number
+
+    @native
+    public function score(self): number
+        return (if self.tier == "S" then 100 else 10) + self.ordering
+    end
+
+    public @native function beats(self, other: NativeRanked): boolean
+        return self:score() > other:score()
+    end
+end
+
+expectpass("class methods can carry attributes", function()
+    local top = NativeRanked { tier = "S", ordering = 1 }
+    local mid = NativeRanked { tier = "C", ordering = 5 }
+
+    assert(top:score() == 101, `expected 101, got {top:score()}`)
+    assert(mid:score() == 15, `expected 15, got {mid:score()}`)
+    assert(top:beats(mid))
+    assert(not mid:beats(top))
+end)
+
 expectfail("classes cannot be iterated over", "attempt to iterate over a object value", function ()
     local p = Point { x = 1, y = 2}
     for k, v in p do

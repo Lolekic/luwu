@@ -1997,6 +1997,28 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
         std::optional<Location> qualifierLocation;
         AstClassMemberVisibility visibility = AstClassMemberVisibility::Public;
 
+        // Luwu Classes (rfcs/classes.md): a class method may carry attributes, exactly like a free
+        // function -- `@native function update(self) end`. They may be written on either side of the
+        // access specifier (`@native private function` and `private @native function` both read
+        // naturally depending on whether the attribute is on its own line), but not on both sides at
+        // once, which would leave a reader scanning in two places for them.
+        AstArray<AstAttr*> attributes{nullptr, 0};
+        TempVector<CstAttrList*> cstAttrLists(scratchCstAttrList);
+
+        auto memberAttributesFollow = [&]()
+        {
+            return FFlag::LuwuBetterUserDefinedClasses &&
+                   (lexer.current().type == Lexeme::Attribute || lexer.current().type == Lexeme::AttributeOpen);
+        };
+
+        auto parseMemberAttributes = [&]()
+        {
+            attributes = parseAttributes(FFlag::LuauCstAttr ? &cstAttrLists : nullptr);
+        };
+
+        if (memberAttributesFollow())
+            parseMemberAttributes();
+
         // Luwu Classes (rfcs/classes.md): functions in a class are always const, so `const function` is rejected
         // rather than being read as a field -- it's valid outside a class, and easy to paste into one. The `const`
         // is dropped so the function itself still parses.
@@ -2031,7 +2053,9 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
                 return true;
 
             Lexeme::Type next = lexer.lookahead().type;
-            return next == Lexeme::Name || next == Lexeme::ReservedFunction;
+            // An attribute can only introduce a method, so it counts as a member following the
+            // specifier: `private @native function ...`.
+            return next == Lexeme::Name || next == Lexeme::ReservedFunction || next == Lexeme::Attribute || next == Lexeme::AttributeOpen;
         };
 
         if (lexer.current().type == Lexeme::Name && AstName(lexer.current().name) == "public" && qualifierIntroducesMember())
@@ -2050,9 +2074,49 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
             nextLexeme();
         }
 
+        // `public @native function` -- the attributes may equally well follow the access specifier.
+        if (qualifierLocation && memberAttributesFollow())
+        {
+            if (attributes.size > 0)
+            {
+                report(lexer.current().location, "Attributes on a class member must all be written on the same side of the access specifier");
+
+                // Report and keep going: both lists are still kept on the function, so the member
+                // behaves as written and the CST has an entry for every attribute it prints.
+                AstArray<AstAttr*> before = attributes;
+                AstArray<AstAttr*> after = parseAttributes(FFlag::LuauCstAttr ? &cstAttrLists : nullptr);
+
+                TempVector<AstAttr*> merged(scratchAttr);
+                for (AstAttr* attr : before)
+                    merged.push_back(attr);
+                for (AstAttr* attr : after)
+                    merged.push_back(attr);
+
+                attributes = copy(merged);
+            }
+            else
+                parseMemberAttributes();
+        }
+
         // `public const function`
         if (qualifierLocation)
             rejectConstFunction();
+
+        // A field cannot carry attributes; say so rather than reporting a missing field name at the
+        // `function` that never came.
+        if (attributes.size > 0 && lexer.current().type != Lexeme::ReservedFunction)
+        {
+            report(lexer.current().location, "Expected 'function' after attribute, but got %s instead", lexer.current().toString().c_str());
+
+            attributes = {nullptr, 0};
+
+            // A field name still parses as the field it is, keeping whatever access specifier came
+            // with it. Anything else (the class's own `end`, most of all) goes back around the loop
+            // -- parsing it as a field would consume the `end` and swallow the rest of the file.
+            // The attributes were consumed, so this makes progress either way.
+            if (lexer.current().type != Lexeme::Name)
+                continue;
+        }
 
         // If we saw a qualifier _and_ the current token is not `function`,
         // assume this is a property. Under LuwuBetterUserDefinedClasses, an
@@ -2220,7 +2284,9 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
             // the class' print. That would be `self.print`.
             matchRecoveryStopOnToken[Lexeme::ReservedEnd]++;
 
-            auto [body, _] = parseFunctionBody(false, matchFunction, name.name, nullptr, {});
+            auto [body, _] = parseFunctionBody(
+                false, matchFunction, name.name, nullptr, attributes, /* isConst= */ false, FFlag::LuauCstAttr ? &cstAttrLists : nullptr
+            );
 
             matchRecoveryStopOnToken[Lexeme::ReservedEnd]--;
 
@@ -2263,8 +2329,6 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
                 hasSemicolon = true;
             }
 
-            // TODO CLI-200853: We should support attributes, we do not need
-            // to support them prior to the full launch.
             if (classMemberNamespace.contains(name.name) || primaryConstructorParams.contains(name.name))
             {
                 report(name.location, "Duplicate class member '%s'", name.name.value);

@@ -2190,6 +2190,30 @@ end
     CHECK_EQ(code, prettyPrint(code, {}, true).code);
 }
 
+TEST_CASE("class_with_method_attributes")
+{
+    ScopedFastFlag fflags[] = {
+        {FFlag::DebugLuauUserDefinedClasses, true},
+        {FFlag::LuwuBetterUserDefinedClasses, true},
+        {FFlag::LuauCstAttr, true},
+    };
+
+    // Attributes on either side of the access specifier come back out where they were written.
+    std::string code = R"(
+class Point
+    private x: number
+    @native
+    public function length(self)
+        return 100
+    end
+    private @native function scaled(self)
+        return 100
+    end
+end
+    )";
+    CHECK_EQ(code, prettyPrint(code, {}, true).code);
+}
+
 TEST_CASE("prettyPrint_function_attributes")
 {
     ScopedFastFlag fflags[] = {{FFlag::LuauCstAttr, true}, {FFlag::LuauExportValueSyntax, true}};

@@ -1461,10 +1461,40 @@ struct Printer
                         },
                         [&](const AstClassMethod& method)
                         {
+                            // A method's attributes may be written on either side of the access
+                            // specifier, so emit them in the order the source had them -- `advance`
+                            // never moves backwards, and writing them in the wrong order would run
+                            // them into the keyword.
+                            auto visualizeMethodAttributes = [&]()
+                            {
+                                if (FFlag::LuauCstAttr)
+                                {
+                                    if (const CstExprFunction* cstNode = lookupCstNode<CstExprFunction>(method.function))
+                                        visualizeAttributes(method.function->attributes, &cstNode->attrLists);
+                                    else
+                                        visualizeAttributes(method.function->attributes, nullptr);
+                                }
+                                else
+                                {
+                                    for (const auto& attribute : method.function->attributes)
+                                        visualizeAttribute(*attribute);
+                                }
+                            };
+
+                            const bool attributesPrecedeQualifier = method.function->attributes.size > 0 && method.qualifierLocation &&
+                                                                    method.function->attributes.data[0]->location.begin <
+                                                                        method.qualifierLocation->begin;
+
+                            if (!method.qualifierLocation || attributesPrecedeQualifier)
+                                visualizeMethodAttributes();
+
                             if (method.qualifierLocation)
                             {
                                 writer.advance(method.qualifierLocation->begin);
                                 writer.keyword(method.visibility == AstClassMemberVisibility::Private ? "private" : "public");
+
+                                if (!attributesPrecedeQualifier)
+                                    visualizeMethodAttributes();
                             }
                             writer.advance(method.keywordLocation.begin);
                             writer.keyword("function");
