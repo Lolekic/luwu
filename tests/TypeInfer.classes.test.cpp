@@ -2014,6 +2014,32 @@ end
     CHECK_EQ("Prefix", toString(get<TypeMismatch>(result.errors[1])->givenType));
 }
 
+TEST_CASE_FIXTURE(BuiltinsFixture, "type_function_calling_itself_in_a_loop_with_classes_enabled")
+{
+    ScopedFastFlag sffs[] = {
+        {FFlag::DebugLuauForceOldSolver, false},
+        {FFlag::DebugLuauUserDefinedClasses, true},
+        {FFlag::LuwuBetterUserDefinedClasses, true},
+    };
+
+    // The class fallback above resolves a global read through a phi def by its binding. A type
+    // function calling itself in a loop reads its own name through the loop's phi, and handing back
+    // its binding gave it its own unsolved type: every call made with the result failed with
+    // "outstanding free or blocked type in function call", and definition files using the pattern
+    // (PhoenixEngine's `phoenix.d.luau`) failed to load in luwu-lsp, which always enables classes.
+    auto result = check(R"(
+type function flatten(un: type): { type }
+    local results = {}
+    for _, inner in flatten(un) do
+        table.insert(results, inner)
+    end
+    return results
+end
+    )");
+
+    LUAU_REQUIRE_NO_ERRORS(result);
+}
+
 TEST_CASE_FIXTURE(ClassesFixture, "constructor_argument_that_is_itself_a_constructor_call")
 {
     ScopedFastFlag sffs[] = {

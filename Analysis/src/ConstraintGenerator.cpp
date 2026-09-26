@@ -1043,6 +1043,7 @@ void ConstraintGenerator::prototypeTypeDefinitions(const ScopePtr& scope, AstSta
             TypeId theTy = arena->addType(BlockedType{});
             scope->bindings[classDecl->name->name] = Binding{theTy, classDecl->name->location};
             scope->lvalueTypes[theDef] = theTy;
+            classGlobalNames.insert(classDecl->name->name);
 
             // Under LuwuGenericNominals, property and method type annotations are resolved
             // against the class's own definition scope, so that references to the class's own
@@ -3709,7 +3710,12 @@ Inference ConstraintGenerator::check(const ScopePtr& scope, AstExprGlobal* globa
     // *after* that walk, so no such mapping exists and any reference downstream of an `if` that
     // also mentions the class fell through to `errorType`. Globals carry no typestate, so the
     // binding is the answer prepopulation would have given.
-    if (FFlag::DebugLuauUserDefinedClasses && get<Phi>(def))
+    //
+    // Only for a class. Any other global reaching here keeps `errorType`: a user-defined type function
+    // calling itself inside a loop (`for _, x in f(t) do`) reads its own name through a loop phi, and
+    // handing back its binding there gives it its own still-unsolved type, which blocks every call
+    // made with the result ("outstanding free or blocked type in function call").
+    if (FFlag::DebugLuauUserDefinedClasses && get<Phi>(def) && classGlobalNames.contains(global->name))
     {
         if (auto ty = scope->lookup(global->name))
             return Inference{*ty, refinementArena.proposition(key, builtinTypes->truthyType)};

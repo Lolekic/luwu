@@ -138,6 +138,11 @@ struct ConstraintGenerator
     DenseHashMap<const AstStatDeclareExternType*, ScopePtr> astExternTypeDefiningScopes{nullptr};
     DenseHashMap<const AstStatClass*, ScopePtr> astClassDefiningScopes{nullptr};
 
+    // Luwu Classes (rfcs/classes.md): names bound by a class declaration. `checkGlobal` resolves a
+    // class referenced past a control-flow join by its binding, and must not do that for any other
+    // global: see the comment there.
+    DenseHashSet<AstName> classGlobalNames{AstName{}};
+
     NotNull<const DataFlowGraph> dfg;
     RefinementArena refinementArena;
 
