@@ -36,6 +36,29 @@ using SyntheticNames = std::unordered_map<const void*, char*>;
 namespace Luau
 {
 
+// How many AstTableProp entries `props` attaches as: one for a property whose read and write types
+// are the same, otherwise one for each of its read and write types.
+//
+// Luwu: upstream Luau (as of 0.739) sizes the array one entry per property (`props.size()`), but the
+// loops that fill it write a separate Read and Write entry for a property whose read and write types
+// differ (`{ read x: number, write x: string }`). They write past the end of the allocation and
+// corrupt whatever the arena put after it; `luau-analyze --annotate` on such a type asserts
+// "Unknown AstType" in a debug build. We size the array by the entries actually written and assert
+// that the loops wrote exactly that many.
+template<typename Props>
+static size_t countPropEntries(const Props& props)
+{
+    size_t entries = 0;
+    for (const auto& [_, prop] : props)
+    {
+        if (prop.isShared())
+            entries += 1;
+        else
+            entries += (prop.readTy ? 1 : 0) + (prop.writeTy ? 1 : 0);
+    }
+    return entries;
+}
+
 static const char* getName(Allocator* allocator, SyntheticNames* syntheticNames, const GenericType& gen)
 {
     size_t s = syntheticNames->size();
@@ -189,7 +212,7 @@ public:
         }
 
         AstArray<AstTableProp> props;
-        props.size = ttv.props.size();
+        props.size = countPropEntries(ttv.props);
         props.data = static_cast<AstTableProp*>(allocator->allocate(sizeof(AstTableProp) * props.size));
         int idx = 0;
         for (const auto& [propName, prop] : ttv.props)
@@ -228,6 +251,8 @@ public:
             }
         }
 
+        LUAU_ASSERT(size_t(idx) == props.size);
+
         AstTableIndexer* indexer = nullptr;
         if (ttv.indexer)
         {
@@ -255,7 +280,7 @@ public:
             return allocator->alloc<AstTypeReference>(Location(), std::nullopt, AstName{name}, std::nullopt, Location());
 
         AstArray<AstTableProp> props;
-        props.size = etv.props.size();
+        props.size = countPropEntries(etv.props);
         props.data = static_cast<AstTableProp*>(allocator->allocate(sizeof(AstTableProp) * props.size));
 
         int idx = 0;
@@ -293,6 +318,8 @@ public:
             }
         }
 
+        LUAU_ASSERT(size_t(idx) == props.size);
+
         AstTableIndexer* indexer = nullptr;
         if (etv.indexer)
         {
@@ -317,9 +344,11 @@ public:
         generics.size = ftv.generics.size();
         generics.data = static_cast<AstGenericType**>(allocator->allocate(sizeof(AstGenericType) * generics.size));
         size_t numGenerics = 0;
+        // Luwu: `follow` backported from upstream 0.736. A generalized function's generic list can
+        // hold a bound type, which `get` asserts on and release builds read as garbage.
         for (auto it = ftv.generics.begin(); it != ftv.generics.end(); ++it)
         {
-            if (auto gtv = get<GenericType>(*it))
+            if (auto gtv = get<GenericType>(follow(*it)))
                 generics.data[numGenerics++] = allocator->alloc<AstGenericType>(Location(), AstName(gtv->name.c_str()), nullptr);
         }
 
@@ -329,7 +358,7 @@ public:
         size_t numGenericPacks = 0;
         for (auto it = ftv.genericPacks.begin(); it != ftv.genericPacks.end(); ++it)
         {
-            if (auto gtv = get<GenericTypePack>(*it))
+            if (auto gtv = get<GenericTypePack>(follow(*it)))
                 genericPacks.data[numGenericPacks++] = allocator->alloc<AstGenericTypePack>(Location(), AstName(gtv->name.c_str()), nullptr);
         }
 

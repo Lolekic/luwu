@@ -14,6 +14,7 @@ LUAU_FASTFLAG(DebugLuauUserDefinedClasses)
 LUAU_FASTFLAG(LuauTableEntriesDontNeedToMatchIndent)
 LUAU_FASTFLAG(LuauCstAttr)
 LUAU_FASTFLAG(LuwuBetterUserDefinedClasses)
+LUAU_FASTFLAG(DebugLuauForceOldSolver)
 LUAU_FASTFLAG(LuwuDefaultArguments)
 
 using namespace Luau;
@@ -2671,6 +2672,57 @@ TEST_CASE("pretty_print_incomplete_attr_args")
     )=";
 
     CHECK_EQ(code, prettyPrint(code, {}, true, true).code);
+}
+
+TEST_CASE_FIXTURE(Fixture, "attach_types_to_a_property_with_different_read_and_write_types")
+{
+    ScopedFastFlag newSolver{FFlag::DebugLuauForceOldSolver, false};
+
+    // `x` attaches as two entries, one for its read type and one for its write type.
+    std::string code = R"(
+        local function f(t: { read x: number, write x: string })
+            local u = t
+            return u
+        end
+    )";
+
+    // The printer only writes `read`/`write` where the source had them, so the attached entries print
+    // bare; what matters is that both are there.
+    std::string decorated = decorateWithTypes(code);
+    CHECK(decorated.find("local u:{x:number,x:string}=t") != std::string::npos);
+}
+
+TEST_CASE_FIXTURE(BuiltinsFixture, "attach_types_to_a_function_whose_generics_are_bound")
+{
+    ScopedFastFlag newSolver{FFlag::DebugLuauForceOldSolver, false};
+
+    // Luwu: taken from upstream 0.736 (after our last sync at 0.731). Generalization can leave a
+    // function's generic list holding a bound type, and reading it without `follow` asserted, or read a
+    // bound type as a generic and crashed in release builds.
+    std::string code = R"(--!strict
+        local Account = {}
+        Account.__index = Account
+        function Account.new(balance)
+            local self = setmetatable({}, Account)
+            self.balance = balance
+            self.owner = "x"
+            return self
+        end
+        function Account:deposit(n)
+            self.balance = self.balance + n
+        end
+        function Account:withdraw(n)
+            if n > self.balance then error("no") end
+            self.balance -= n
+        end
+        local a = Account.new(10)
+        a:deposit(5)
+        a:withdraw(3)
+        print(a.balance, a.owner)
+    )";
+
+    std::string decorated = decorateWithTypes(code);
+    CHECK(decorated.find("local a:") != std::string::npos);
 }
 
 TEST_SUITE_END();
