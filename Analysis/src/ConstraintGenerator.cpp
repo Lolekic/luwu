@@ -1064,6 +1064,9 @@ void ConstraintGenerator::prototypeTypeDefinitions(const ScopePtr& scope, AstSta
             ExternType::Props props;
             TableType::Props instanceMetatableProps;
             DenseHashMap<AstName, TypeId> memberTypes{AstName{""}};
+            DenseHashMap<AstName, TypeId> classValueMethodTypes{AstName{""}};
+            const bool isGenericClass = FFlag::LuwuBetterUserDefinedClasses && FFlag::LuwuGenericNominals &&
+                                        (classDecl->generics.size != 0 || classDecl->genericPacks.size != 0);
             // Names of `props` entries that are actual fields (AstClassProperty), not methods.
             // See ClassFieldUserData's doc comment for why this needs tracking separately.
             std::set<Name> instanceFieldNames;
@@ -1142,13 +1145,28 @@ void ConstraintGenerator::prototypeTypeDefinitions(const ScopePtr& scope, AstSta
                             prop.location = method.nameLocation;
                             if (FFlag::DebugLuauUserDefinedClasses && FFlag::LuwuBetterUserDefinedClasses)
                                 prop.isPrivate = method.visibility == AstClassMemberVisibility::Private;
-                            if (method.function->args.size < 1 || method.function->args.data[0]->name != "self" ||
-                                method.functionName == "__init")
+                            // Luwu Classes (rfcs/classes.md): an instance method is also readable through the
+                            // class value, with the same type (`self` is the object type): `Cls.method(obj)`
+                            // and `Cls.method` as a value are how it is called without method-call syntax.
+                            // A metamethod stays on the instance metatable only.
+                            const bool takesSelf = method.function->args.size >= 1 && method.function->args.data[0]->name == "self";
+                            const bool isMetamethod = isValidClassMetamethod(method.functionName.value);
+                            const bool readableThroughClass = !takesSelf || method.functionName == "__init" || !isMetamethod;
+                            const bool needsOwnClassValueType = readableThroughClass && takesSelf && isGenericClass && method.functionName != "__init";
+                            if (needsOwnClassValueType)
+                            {
+                                Property classValueProp = prop;
+                                TypeId classValueTy = arena->addType(BlockedType{});
+                                classValueProp.readTy = classValueTy;
+                                classValueMethodTypes[method.functionName] = classValueTy;
+                                staticProps[method.functionName.value] = classValueProp;
+                            }
+                            else if (readableThroughClass)
                                 staticProps[method.functionName.value] = prop;
                             // The parser will report an error for classes that define disallowed metamethods.
                             // The RFC also requires that it is a syntax error for methods to have __ in their name whos name is not in the
                             // validClassMetamethod set.
-                            if (isValidClassMetamethod(method.functionName.value))
+                            if (isMetamethod)
                                 instanceMetatableProps[method.functionName.value] = prop;
                             else
                                 props[method.functionName.value] = prop;
@@ -1336,7 +1354,13 @@ void ConstraintGenerator::prototypeTypeDefinitions(const ScopePtr& scope, AstSta
 
             classDeclRecords[classDecl->name] = std::make_unique<ClassDeclRecord>(
                 ClassDeclRecord{
-                    classInstanceTy, std::move(memberTypes), ctorTy, primaryInitTy, std::move(classTypeParams), std::move(classTypePackParams)
+                    classInstanceTy,
+                    std::move(memberTypes),
+                    ctorTy,
+                    primaryInitTy,
+                    std::move(classTypeParams),
+                    std::move(classTypePackParams),
+                    std::move(classValueMethodTypes)
                 }
             );
         }
@@ -2922,9 +2946,24 @@ ControlFlow ConstraintGenerator::visit(const ScopePtr& scope, AstStatClass* stat
 
                     propagateDeprecatedAttributeToConstraint(c->c, method.function);
 
+                    TypeId* classValueMethodTy = classDeclRecord->classValueMethodTypes.find(method.functionName);
+                    if (classValueMethodTy)
+                    {
+                        GeneralizationConstraint* gc = get_if<GeneralizationConstraint>(&c->c);
+                        LUAU_ASSERT(gc);
+                        gc->classValueMethodType = *classValueMethodTy;
+                        for (const GenericTypeDefinition& param : classDeclRecord->typeParams)
+                            gc->classGenerics.push_back(param.ty);
+                        for (const GenericTypePackDefinition& param : classDeclRecord->typePackParams)
+                            gc->classGenericPacks.push_back(param.tp);
+                    }
+
                     addAllAsDependenciesAndChainReturns(start, end, this, NotNull{c.get()});
 
-                    getMutable<BlockedType>(functionType)->setOwner(addConstraint(scope, std::move(c)));
+                    NotNull<Constraint> generalization = addConstraint(scope, std::move(c));
+                    getMutable<BlockedType>(functionType)->setOwner(generalization);
+                    if (classValueMethodTy)
+                        getMutable<BlockedType>(*classValueMethodTy)->setOwner(generalization);
                 }
             },
             member
@@ -3260,13 +3299,13 @@ InferencePack ConstraintGenerator::checkExprCall(
                     if (!ov || ov->generics.empty())
                         continue;
 
+                    // `exprArgs` (and `args`) already start with the `self` argument of a `:` call,
+                    // so argument `i` lines up with parameter `i` whether or not `ov` has `self`.
                     auto [ovArgsHead, ovArgsTail] = flatten(ov->argTypes);
-                    size_t ovStart = ov->hasSelf ? 1 : 0;
-                    size_t myPos = ovStart + i;
-                    if (myPos >= ovArgsHead.size())
+                    if (i >= ovArgsHead.size())
                         continue;
 
-                    TypeId declaredParamTy = follow(ovArgsHead[myPos]);
+                    TypeId declaredParamTy = follow(ovArgsHead[i]);
 
                     bool isBareGenericParam = false;
                     for (TypeId g : ov->generics)
@@ -3280,13 +3319,9 @@ InferencePack ConstraintGenerator::checkExprCall(
                     if (!isBareGenericParam)
                         continue;
 
-                    for (size_t j = ovStart; j < myPos; ++j)
+                    for (size_t j = 0; j < i && j < args.size(); ++j)
                     {
-                        size_t exprIndex = j - ovStart;
-                        if (exprIndex >= args.size())
-                            continue;
-
-                        if (auto resolvedTy = tryResolveGenericFromArrayArg(declaredParamTy, follow(ovArgsHead[j]), follow(args[exprIndex])))
+                        if (auto resolvedTy = tryResolveGenericFromArrayArg(declaredParamTy, follow(ovArgsHead[j]), follow(args[j])))
                         {
                             resolvedOptions.push_back(*resolvedTy);
                             break;

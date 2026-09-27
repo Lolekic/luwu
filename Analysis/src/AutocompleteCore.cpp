@@ -15,6 +15,7 @@
 #include "Luau/Subtyping.h"
 #include "Luau/TypeInfer.h"
 #include "Luau/TypePack.h"
+#include "Luau/TypeUtils.h"
 
 #include <algorithm>
 #include <array>
@@ -414,8 +415,8 @@ static void autocompleteProps(
                 // class's definition block.
                 if (prop.isPrivate)
                 {
-                    bool insideOwningClass = owner && owner->definitionLocation && !nodes.empty() &&
-                                              owner->definitionLocation->contains(nodes.back()->location.begin);
+                    bool insideOwningClass =
+                        owner && !nodes.empty() && isInsideClassDeclaration(owner, module.name, nodes.back()->location);
                     if (!insideOwningClass)
                         continue;
                 }

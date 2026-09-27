@@ -15,49 +15,75 @@
 #include "lualib.h"
 #include "lvm.h"
 
+#include <string.h>
+
 // Continuation for luaR_createobject: runs after a custom __init returns (possibly across a yield),
 // leaving the freshly-constructed object as the constructor's single result. See luaR_createobject.
 static int luaR_createobjectcont(lua_State* L, int status);
 
-LuauClass* luaR_newclass(
-    lua_State* L,
-    TString* name,
-    LuaTable* memberstooffset,
-    TString** offsettomember,
-    uint8_t* memberflags,
-    uint32_t numberofinstancemembers,
-    uint32_t numberofstaticmembers
-)
+LuauClass* luaR_newclass(lua_State* L, TString* name, uint32_t numberofinstancemembers, uint32_t numberofstaticmembers, bool hasmemberdefaults)
 {
     LUAU_ASSERT(L->global->GCthreshold == SIZE_MAX && "GC must be paused");
     LuauClass* classdef = luaM_newgco(L, LuauClass, sizeof(LuauClass), L->activememcat);
     luaC_init(L, classdef, LUA_TCLASS);
+
+    // Every allocation below can raise LUA_ERRMEM, and the class is swept (luaR_freeclass) afterwards,
+    // so every field it frees is valid before the first of them.
     classdef->name = name;
+    classdef->staticmembers = NULL;
+    classdef->memberstooffset = NULL;
+    classdef->offsettomember = NULL;
+    classdef->metatable = NULL;
+    classdef->instancemetatable = NULL;
+    classdef->numberofinstancemembers = numberofinstancemembers;
+    classdef->numberofallmembers = numberofinstancemembers + numberofstaticmembers;
+    classdef->hascustominit = false;
+    classdef->initoffset = 0;
+    classdef->hasprimaryinit = false;
+    classdef->memberflags = NULL;
+    classdef->hasprivatemembers = false;
+    classdef->hasconstmembers = false;
+    classdef->haspoddefaultsfn = false;
+    classdef->poddefaultsoffset = 0;
+    classdef->memberdefaults = NULL;
+
+    classdef->offsettomember = luaM_newarray(L, classdef->numberofallmembers, TString*, classdef->memcat);
+    for (uint32_t i = 0; i < classdef->numberofallmembers; i++)
+        classdef->offsettomember[i] = NULL;
+
+    classdef->memberflags = luaM_newarray(L, classdef->numberofallmembers, uint8_t, classdef->memcat);
+    memset(classdef->memberflags, 0, classdef->numberofallmembers);
 
     classdef->staticmembers = luaM_newarray(L, numberofstaticmembers, TValue, classdef->memcat);
-    // Initialize static members to nil, otherwise we may read uninitialized memory.
     for (uint32_t i = 0; i < numberofstaticmembers; i++)
         setnilvalue(&classdef->staticmembers[i]);
 
-    classdef->memberstooffset = memberstooffset;
-    classdef->offsettomember = offsettomember;
-    classdef->memberdefaults = NULL;
+    if (hasmemberdefaults)
+    {
+        classdef->memberdefaults = luaM_newarray(L, numberofinstancemembers, TValue, classdef->memcat);
+        for (uint32_t i = 0; i < numberofinstancemembers; i++)
+            setnilvalue(&classdef->memberdefaults[i]);
+    }
 
-    // Initialize the metatable of the _class value_, which for now only
-    // contains an __call entry for the class constructor.
+    classdef->memberstooffset = luaH_new(L, 0, classdef->numberofallmembers);
+
+    // The metatable of the _class value_, which only holds `__call`, the constructor.
     classdef->metatable = luaH_new(L, 0, 1);
-    // We should probably pass an empty table here rather than the global
-    // environment.
-    static const char kCtorSuffix[] = "() constructor";
-    size_t namelen = strlen(getstr(name));
-    size_t ctordebugnamelen = namelen + sizeof(kCtorSuffix); // includes the null terminator
-    classdef->ctordebugname = luaM_newarray(L, ctordebugnamelen, char, classdef->memcat);
-    memcpy(classdef->ctordebugname, getstr(name), namelen);
-    memcpy(classdef->ctordebugname + namelen, kCtorSuffix, sizeof(kCtorSuffix));
 
-    Closure* constructor = luaF_newCclosure(L, 0, L->gt);
+    // The constructor can outlive the class (`debug.info` hands it out from inside `__init`), so its
+    // debug name is a string it holds as an upvalue rather than memory owned by the class.
+    static const char kCtorSuffix[] = "() constructor";
+    TString* debugnamestr = luaS_bufstart(L, name->len + sizeof(kCtorSuffix) - 1);
+    memcpy(debugnamestr->data, getstr(name), name->len);
+    memcpy(debugnamestr->data + name->len, kCtorSuffix, sizeof(kCtorSuffix) - 1);
+    debugnamestr = luaS_buffinish(L, debugnamestr);
+
+    // The environment only matters to functions that read globals, which the constructor doesn't.
+    Closure* constructor = luaF_newCclosure(L, 1, L->gt);
+    setsvalue(L, &constructor->c.upvals[0], debugnamestr);
     constructor->c.f = luaR_createobject;
-    constructor->c.debugname = classdef->ctordebugname;
+    // points into upvalue 1: an embedder replacing that upvalue with lua_setupvalue leaves this dangling
+    constructor->c.debugname = getstr(debugnamestr);
     // a continuation makes construction yieldable: a custom __init may call coroutine.yield (or a
     // yielding C function), suspending mid-construction and resuming into luaR_createobjectcont
     constructor->c.cont = luaR_createobjectcont;
@@ -65,39 +91,44 @@ LuauClass* luaR_newclass(
     LUAU_ASSERT(ttisnil(dest));
     setclvalue(L, dest, constructor);
     classdef->metatable->readonly = true;
-    classdef->instancemetatable = NULL;
-
-    classdef->numberofinstancemembers = numberofinstancemembers;
-    classdef->numberofallmembers = numberofinstancemembers + numberofstaticmembers;
-    classdef->hascustominit = false;
-    classdef->hasprimaryinit = false;
-    classdef->initoffset = 0;
-    classdef->haspoddefaultsfn = false;
-    classdef->poddefaultsoffset = 0;
-
-    classdef->memberflags = memberflags;
-    classdef->hasprivatemembers = false;
-    classdef->hasconstmembers = false;
-    for (uint32_t i = 0; i < classdef->numberofallmembers; i++)
-    {
-        classdef->hasprivatemembers |= (memberflags[i] & LBC_CLASSMEMBER_PRIVATE) != 0;
-        classdef->hasconstmembers |= (memberflags[i] & LBC_CLASSMEMBER_CONST) != 0;
-    }
-
-    // Calling `__init` on a constructed object would reassign its `const` fields, so a class with a
-    // `const` field makes its `__init` unreadable as a member (see LBC_CLASSMEMBER_INITBLOCKED). Every
-    // class has an `__init` member by now: a custom or primary one from the shape, or the default one the loader
-    // reserves. Setting `hasprivatemembers` routes every member read through luaR_checkprivateaccess,
-    // which is where the bit is enforced.
-    if (classdef->hasconstmembers)
-    {
-        const TValue* initoffset = luaH_getstr(memberstooffset, luaS_newlstr(L, "__init", 6));
-        LUAU_ASSERT(!ttisnil(initoffset));
-        memberflags[uint32_t(nvalue(initoffset))] |= LBC_CLASSMEMBER_INITBLOCKED;
-        classdef->hasprivatemembers = true;
-    }
 
     return classdef;
+}
+
+void luaR_sealclassshape(lua_State* L, LuauClass* classdef)
+{
+    for (uint32_t i = 0; i < classdef->numberofallmembers; i++)
+    {
+        LUAU_ASSERT(classdef->offsettomember[i]);
+        classdef->hasprivatemembers |= (classdef->memberflags[i] & LBC_CLASSMEMBER_PRIVATE) != 0;
+        classdef->hasconstmembers |= (classdef->memberflags[i] & LBC_CLASSMEMBER_CONST) != 0;
+    }
+
+    // `__init` is never readable by name, from anywhere: calling it on a constructed object would
+    // re-run construction on it, which may reassign its `const` fields. Construction reads it by
+    // offset, so it is unaffected. Every class has an `__init` member: a custom or primary one from the
+    // shape, or the one the loader reserves.
+    //
+    // The ban costs other members nothing. `__init` has no name in `offsettomember`, so no cached-slot
+    // fast path (which compares the key against that name) ever resolves it; a read by name always
+    // takes a hash lookup through `memberstooffset`, and every such path runs luaR_checkprivateaccessfast,
+    // which raises on LBC_CLASSMEMBER_INITBLOCKED.
+    const TValue* initoffset = luaH_getstr(classdef->memberstooffset, luaS_newlstr(L, "__init", 6));
+    LUAU_ASSERT(!ttisnil(initoffset));
+    classdef->initoffset = uint32_t(nvalue(initoffset));
+    LUAU_ASSERT(classdef->initoffset >= classdef->numberofinstancemembers && classdef->initoffset < classdef->numberofallmembers);
+    classdef->memberflags[classdef->initoffset] |= LBC_CLASSMEMBER_INITBLOCKED;
+    classdef->offsettomember[classdef->initoffset] = NULL;
+
+    classdef->memberstooffset->readonly = true;
+}
+
+size_t luaR_classsize(const LuauClass* classdef)
+{
+    uint32_t numberofstaticmembers = classdef->numberofallmembers - classdef->numberofinstancemembers;
+
+    return sizeof(LuauClass) + numberofstaticmembers * sizeof(TValue) + classdef->numberofallmembers * (sizeof(TString*) + sizeof(uint8_t)) +
+           (classdef->memberdefaults ? classdef->numberofinstancemembers * sizeof(TValue) : 0);
 }
 
 bool luaR_closureisinit(const LuauClass* classdef, const Closure* cl)
@@ -111,9 +142,8 @@ bool luaR_closureisinit(const LuauClass* classdef, const Closure* cl)
 
 bool luaR_closureownsprivateaccess(const LuauClass* classdef, const Closure* cl)
 {
-    // Since we're adding a property to keep track of class ownership to every single function proto
-    // for ncg lowering let's just use that prop. covers all closures lexically scoped inside
-    // private access owning closure as well.
+    // Proto::ownerclass is stamped on every method proto and every proto nested in one (see
+    // luaR_stampownerclass), so this covers closures created inside a method too.
     return !cl->isC && cl->l.p->ownerclass == classdef;
 }
 
@@ -123,9 +153,8 @@ bool luaR_closureownsprivateaccess(const LuauClass* classdef, const Closure* cl)
 //
 // This exists for `luaR_createobject`, which is the class's `__call` metamethod and therefore performs
 // construction *on behalf of whoever called the class*. Its immediate caller is not that: for
-// `pcall(SomeClass, ...)` it is `pcall`, and treating a builtin's C frame as authority is exactly what
-// let a private constructor be laundered through `pcall`/`xpcall`. Note this is not the rule for an
-// access a C function performs itself -- see luaR_checkprivateaccess.
+// `pcall(SomeClass, ...)` it is `pcall`, and a builtin's C frame is not authority for anything. Note
+// this is not the rule for an access a C function performs itself -- see luaR_checkprivateaccess.
 static const Closure* luaR_callinglua(lua_State* L)
 {
     for (CallInfo* ci = L->ci; ci > L->base_ci; ci--)
@@ -137,8 +166,7 @@ static const Closure* luaR_callinglua(lua_State* L)
 
 void luaR_checkprivateaccess(lua_State* L, const TValue* key, const LuauClass* classdef, const Closure* cl, uint32_t offset)
 {
-    // Unlike `private`, this binds native code and the class's own methods too: the rule is that a
-    // constructed object's `const` fields are never reassigned, whoever would be doing it.
+    // Unlike `private`, this binds native code and the class's own methods too.
     if (LUAU_UNLIKELY((classdef->memberflags[offset] & LBC_CLASSMEMBER_INITBLOCKED) != 0))
         luaG_blockedinitaccesserror(L, classdef->name);
 
@@ -161,29 +189,36 @@ void luaR_checkprivateaccess(lua_State* L, const TValue* key, const LuauClass* c
 
 void luaR_checkprivateconstructor(lua_State* L, const LuauClass* classdef, const Closure* cl)
 {
-    if (!classdef->hascustominit || (classdef->memberflags[classdef->initoffset] & LBC_CLASSMEMBER_PRIVATE) == 0)
-        return;
+    LUAU_ASSERT(luaR_hasprivateconstructor(classdef));
 
     // See luaR_checkprivateaccess for why native code is trusted.
     if (!cl || cl->isC || luaR_closureownsprivateaccess(classdef, cl))
         return;
 
-    TValue initname;
-    setsvalue(L, &initname, classdef->offsettomember[classdef->initoffset]);
-    luaG_privateaccesserror(L, &initname, classdef->name);
+    luaG_privateconstructorerror(L, classdef->name);
 }
 
-void luaR_checkconstassign(lua_State* L, const TValue* key, const LuauClass* classdef, const Closure* cl, uint32_t offset)
+void luaR_checkconstassign(lua_State* L, const TValue* key, const LuauObject* object, const Closure* cl, uint32_t offset)
 {
+    const LuauClass* classdef = object->lclass;
+
     if ((classdef->memberflags[offset] & LBC_CLASSMEMBER_CONST) == 0)
         return;
 
     // Unlike `private`, native code is held to this too: `const` is a language guarantee, and nothing a
     // C function does is construction (construction writes members directly, not through here).
-    if (cl && luaR_closureisinit(classdef, cl))
-        return;
+    if (!cl || !luaR_closureisinit(classdef, cl))
+        luaG_constassignerror(L, key, classdef->name);
 
-    luaG_constassignerror(L, key, classdef->name);
+    // `__init` constructs the object in its `self` parameter, which is register 0 of its frame (a
+    // vararg `__init` moves its fixed parameters, and its base with them). Any other object of the
+    // class is already constructed.
+    LUAU_ASSERT(isLua(L->ci) && clvalue(L->ci->func) == cl);
+    const TValue* self = L->ci->base;
+    bool writesownself = ttisobject(self) && objectvalue(self) == object;
+
+    if (!writesownself)
+        luaG_constassignnotselferror(L, key, classdef->name);
 }
 
 // Stamps `ownerclass` recursively on function proto `p` and every function proto lexically nested
@@ -209,15 +244,15 @@ void luaR_addclassmember(lua_State* L, LuauClass* classdef, TString* name, TValu
 
     // Stamp this function/method's proto (and any function lexically within it) with info about
     // the owning class so NCG and interpreter can authorize private access from any function lexically
-    // scoped within the class. 
+    // scoped within the class.
     Closure* mcl = clvalue(value);
     if (!mcl->isC)
         luaR_stampownerclass(L, mcl->l.p, classdef);
 
     if (name == luaS_newlstr(L, "__init", 6))
     {
+        LUAU_ASSERT(classdef->initoffset == offsetint);
         classdef->hascustominit = true;
-        classdef->initoffset = offsetint;
         // A primary constructor's `__init` only assigns fields from its parameters, so a construction
         // site is allowed to do that itself and skip the call (LOP_NEWOBJECT's FIELDS form).
         classdef->hasprimaryinit = (classdef->memberflags[offsetint] & LBC_CLASSMEMBER_PRIMARYINIT) != 0;
@@ -251,83 +286,6 @@ void luaR_addclassmember(lua_State* L, LuauClass* classdef, TString* name, TValu
     }
 }
 
-// Initializes the object with the POD constructor, with L->base + 1 being the stack location we expect
-// the user-provided table matching expected fields to values to be. Since classes can have 0 fields that need to be
-// initialized we also allow Class() here as well (if class actually had fields they will be nil)
-//
-// Field defaults come from one of two places: constant defaults are serialized into the class shape
-// and copied straight out of classdef->memberdefaults, while a class with any non-constant default
-// (`= {}`, a call, ...) still calls its synthesized `__defaults` closure, since those have to be
-// re-evaluated on every construction. Only the latter pays for a `lua_call` here.
-static void luaR_defaultinitinstancefields(lua_State* L, LuauClass* classdef, LuauObject* object, int numargs)
-{
-    if (classdef->haspoddefaultsfn)
-    {
-        setobj2s(L, L->top, &classdef->staticmembers[classdef->poddefaultsoffset - classdef->numberofinstancemembers]);
-        L->top++;
-        lua_call(L, 0, classdef->numberofinstancemembers);
-
-        StkId results = L->top - classdef->numberofinstancemembers;
-        for (uint32_t idx = 0; idx < classdef->numberofinstancemembers; idx++)
-            setobj(L, &object->members[idx], &results[idx]);
-
-        L->top -= classdef->numberofinstancemembers;
-    }
-
-    // Stack location to hold the table lookup result
-    setnilvalue(L->top);
-    L->top++;
-
-    // The argument is a plain field bag in every realistic case, so read it with a direct string
-    // lookup; only a table carrying a metatable (or a non-table) needs the generic __index-aware path.
-    LuaTable* argtable = NULL;
-
-    if (numargs == 2 && ttistable(L->base + 1))
-    {
-        LuaTable* candidate = hvalue(L->base + 1);
-
-        if (candidate->metatable == NULL)
-            argtable = candidate;
-    }
-
-    switch (numargs)
-    {
-    case 1:
-        // assume class has 0 fields to initialize or user wants all fields to be nil (or their default)
-        break;
-    case 2:
-        if (argtable)
-        {
-            luaR_applyobjectfields(L, classdef, object, argtable);
-            break;
-        }
-
-        // by going over the expected instance members instead of the passed table we ensure
-        // that users can't add arbitrary properties to the object within the default constructor
-        for (uint32_t idx = 0; idx < classdef->numberofinstancemembers; idx++)
-        {
-            // A field absent from the table (or explicitly nil) keeps whatever's already in
-            // object->members[idx] -- nil, or that field's default set above.
-            TValue key;
-            setsvalue(L, &key, classdef->offsettomember[idx]);
-            luaV_gettable(L, L->base + 1, &key, L->top - 1);
-
-            if (!ttisnil(L->top - 1))
-                setobj(L, &object->members[idx], L->top - 1);
-        }
-        break;
-    default:
-        luaL_error(
-            L,
-            "the default constructor for constructing a '%s' expected zero or one arguments "
-            "(table mapping field names to values or nothing if class has 0 fields), got an incorrect number of arguments",
-            getstr(classdef->name)
-        );
-    }
-
-    L->top--;
-}
-
 void luaR_applyobjectfields(lua_State* L, LuauClass* classdef, LuauObject* object, LuaTable* arg)
 {
     for (uint32_t idx = 0; idx < classdef->numberofinstancemembers; idx++)
@@ -343,8 +301,13 @@ void luaR_applyobjectfields(lua_State* L, LuauClass* classdef, LuauObject* objec
     }
 }
 
-void luaR_applyobjectfieldsslow(lua_State* L, LuauClass* classdef, LuauObject* object, const TValue* arg)
+// luaR_applyobjectfieldsslow with the reads made on behalf of `accessor` (NULL: native code).
+static void luaR_applyobjectfieldsas(lua_State* L, LuauClass* classdef, LuauObject* object, const TValue* arg, const Closure* accessor)
 {
+    // `Point(nil)` constructs the same object as `Point()`.
+    if (ttisnil(arg))
+        return;
+
     // `arg` may live on the stack, and an __index metamethod can reallocate it, so work off a copy;
     // the original slot keeps the value alive for the GC.
     TValue source = *arg;
@@ -359,13 +322,81 @@ void luaR_applyobjectfieldsslow(lua_State* L, LuauClass* classdef, LuauObject* o
         setsvalue(L, &key, classdef->offsettomember[idx]);
 
         // L->top - 1 is recomputed every iteration because the lookup can move the stack
-        luaV_gettable(L, &source, &key, L->top - 1);
+        luaV_gettablefor(L, &source, &key, L->top - 1, accessor);
+        const TValue* value = L->top - 1;
 
-        if (!ttisnil(L->top - 1))
-            setobj(L, &object->members[idx], L->top - 1);
+        // A field absent from the argument (or nil) keeps its default.
+        if (!ttisnil(value))
+        {
+            setobj(L, &object->members[idx], value);
+            // An __index call can run the collector, so `object` may already be black; once the next
+            // field's lookup overwrites the stack slot, this member is the value's only reference.
+            luaC_barrier(L, object, value);
+        }
     }
 
     L->top--;
+}
+
+void luaR_applyobjectfieldsslow(lua_State* L, LuauClass* classdef, LuauObject* object, const TValue* arg)
+{
+    luaR_applyobjectfieldsas(L, classdef, object, arg, isLua(L->ci) ? clvalue(L->ci->func) : NULL);
+}
+
+// Field defaults come from one of two places: constant defaults are serialized into the class shape
+// and copied by luaR_newobject, while a class with any non-constant default (`= {}`, a call, ...)
+// calls its synthesized `__defaults` closure here, since those have to be re-evaluated on every
+// construction.
+void luaR_initpodobject(lua_State* L, LuauClass* classdef, LuauObject* object, StkId args, int nargs, const Closure* accessor)
+{
+    if (nargs > 1)
+        luaL_error(
+            L,
+            "the default constructor for constructing a '%s' expected zero or one arguments "
+            "(table mapping field names to values or nothing if class has 0 fields), got an incorrect number of arguments",
+            getstr(classdef->name)
+        );
+
+    // `__defaults` and `__index` can reallocate the stack
+    ptrdiff_t argsslot = savestack(L, args);
+
+    if (classdef->haspoddefaultsfn)
+    {
+        uint32_t nresults = classdef->numberofinstancemembers;
+        luaL_checkstack(L, int(nresults) + 1, "class field defaults");
+
+        setobj2s(L, L->top, &classdef->staticmembers[classdef->poddefaultsoffset - classdef->numberofinstancemembers]);
+        L->top++;
+        lua_call(L, 0, int(nresults));
+
+        StkId results = L->top - nresults;
+        for (uint32_t idx = 0; idx < nresults; idx++)
+            setobj(L, &object->members[idx], &results[idx]);
+
+        L->top -= nresults;
+
+        // `object` can be black by now, and the argument's __index calls below can run the collector
+        // before the barrier at the end.
+        luaC_barrierfast(L, object);
+    }
+
+    if (nargs == 0)
+        return;
+
+    const TValue* arg = restorestack(L, argsslot);
+
+    // The argument is a plain field bag in every realistic case, so read it with a direct string
+    // lookup; only a table carrying a metatable (or a non-table) needs the generic __index-aware path.
+    if (ttistable(arg) && hvalue(arg)->metatable == NULL)
+    {
+        luaR_applyobjectfields(L, classdef, object, hvalue(arg));
+        // one barrier for every member written, as SETLIST does
+        luaC_barrierfast(L, object);
+    }
+    else
+    {
+        luaR_applyobjectfieldsas(L, classdef, object, arg, accessor);
+    }
 }
 
 LuauObject* luaR_newobjectuninit(lua_State* L, LuauClass* classdef)
@@ -387,8 +418,8 @@ LuauObject* luaR_newobject(lua_State* L, LuauClass* classdef)
 {
     // The members live in the same allocation as the object itself (see luaR_objectsize): one GC
     // object per instance instead of two, which halves both the allocator traffic and the sweep cost
-    // of constructing objects. `members` stays a real pointer field so every reader -- the
-    // interpreter, native codegen's TRY_OBJECT_MEMBER_ADDR -- is unaffected.
+    // of constructing objects. The interpreter reads them through `members`; native code addresses
+    // them from the object pointer (LUAR_OBJECT_MEMBERS_OFFSET).
     uint32_t nummembers = classdef->numberofinstancemembers;
     LuauObject* object = luaM_newgco(L, LuauObject, luaR_objectsize(nummembers), L->activememcat);
     luaC_init(L, object, LUA_TOBJECT);
@@ -418,14 +449,15 @@ int luaR_createobject(lua_State* L)
     luaL_checktype(L, 1, LUA_TCLASS);
     LuauClass* classdef = classvalue(L->base);
 
-    // Ensure a private constructor is only callable from within its own class.
-    //
     // Construction happens on behalf of whoever called the class, so authority is the nearest Lua
     // frame rather than the frame directly below: for `pcall(SomeClass, ...)` that frame is `pcall`,
     // and a builtin is not authority for anything. Native code with no Lua frame under it at all is
-    // trusted, same as an access it performs itself.
-    if (classdef->hascustominit && classdef->hasprivatemembers)
-        luaR_checkprivateconstructor(L, classdef, luaR_callinglua(L));
+    // trusted, same as an access it performs itself. That authority decides both whether a private
+    // constructor may be called and whether the POD constructor may read an argument's private fields.
+    const Closure* constructing = luaR_callinglua(L);
+
+    if (luaR_hasprivateconstructor(classdef))
+        luaR_checkprivateconstructor(L, classdef, constructing);
 
     LuauObject* object = luaR_newobject(L, classdef);
     int numargs = lua_gettop(L);
@@ -463,10 +495,7 @@ int luaR_createobject(lua_State* L)
         return luaL_callyieldable(L, 1 + (numargs - 1), 0);
     }
 
-    luaR_defaultinitinstancefields(L, classdef, object, numargs);
-
-    // Preserve the GC invariant, moving barrier back once after writing multiple objects (similar to SETLIST)
-    luaC_barrierfast(L, object);
+    luaR_initpodobject(L, classdef, object, L->base + 1, numargs - 1, constructing);
 
     return 1;
 }
@@ -478,68 +507,19 @@ static int luaR_createobjectcont(lua_State* L, int status)
     return 1;
 }
 
-int luaR_defaultinit(lua_State* L)
-{
-    luaL_checktype(L, 1, LUA_TOBJECT);
-    LuauObject* object = objectvalue(L->base);
-    LuauClass* classdef = object->lclass;
-    int numargs = lua_gettop(L);
-
-    if (classdef->memberdefaults)
-    {
-        for (uint32_t idx = 0; idx < classdef->numberofinstancemembers; idx++)
-            setobj(L, &object->members[idx], &classdef->memberdefaults[idx]);
-    }
-    else
-    {
-        for (uint32_t idx = 0; idx < classdef->numberofinstancemembers; idx++)
-            setnilvalue(&object->members[idx]);
-    }
-
-    luaR_defaultinitinstancefields(L, classdef, object, numargs);
-
-    luaC_barrierfast(L, object);
-
-    return 0;
-}
-
-void luaR_adddefaultinit(lua_State* L, LuauClass* classdef)
-{
-    const TValue* offset = luaH_getstr(classdef->memberstooffset, luaS_newlstr(L, "__init", 6));
-    LUAU_ASSERT(!ttisnil(offset));
-    const uint32_t offsetint = uint32_t(nvalue(offset));
-    LUAU_ASSERT(offsetint >= classdef->numberofinstancemembers && offsetint < classdef->numberofallmembers);
-
-    Closure* init = luaF_newCclosure(L, 0, L->gt);
-    init->c.f = luaR_defaultinit;
-    init->c.debugname = "__init";
-    init->c.cont = NULL;
-
-    TValue v;
-    setclvalue(L, &v, init);
-    setobj2class(L, &classdef->staticmembers[offsetint - classdef->numberofinstancemembers], &v);
-    luaC_barrier(L, classdef, &v);
-}
-
-void luaR_setmemberdefaults(lua_State* L, LuauClass* classdef, TValue* defaults)
-{
-    LUAU_ASSERT(classdef->memberdefaults == NULL);
-    classdef->memberdefaults = defaults;
-
-    for (uint32_t idx = 0; idx < classdef->numberofinstancemembers; idx++)
-        luaC_barrier(L, classdef, &defaults[idx]);
-}
-
 void luaR_freeclass(lua_State* L, LuauClass* classdef, lua_Page* page)
 {
-    luaM_freearray(
-        L, classdef->staticmembers, classdef->numberofallmembers - classdef->numberofinstancemembers, TValue, classdef->memcat
-    );
-    luaM_freearray(L, classdef->offsettomember, classdef->numberofallmembers, TString*, classdef->memcat);
-    luaM_freearray(L, classdef->memberflags, classdef->numberofallmembers, uint8_t, classdef->memcat);
+    // Any of these is NULL when an allocation in luaR_newclass failed before it.
+    uint32_t numberofstaticmembers = classdef->numberofallmembers - classdef->numberofinstancemembers;
+
+    if (classdef->staticmembers)
+        luaM_freearray(L, classdef->staticmembers, numberofstaticmembers, TValue, classdef->memcat);
+    if (classdef->offsettomember)
+        luaM_freearray(L, classdef->offsettomember, classdef->numberofallmembers, TString*, classdef->memcat);
+    if (classdef->memberflags)
+        luaM_freearray(L, classdef->memberflags, classdef->numberofallmembers, uint8_t, classdef->memcat);
     if (classdef->memberdefaults)
         luaM_freearray(L, classdef->memberdefaults, classdef->numberofinstancemembers, TValue, classdef->memcat);
-    luaM_freearray(L, classdef->ctordebugname, strlen(classdef->ctordebugname) + 1, char, classdef->memcat);
     luaM_freegco(L, classdef, sizeof(LuauClass), classdef->memcat, page);
 }
 

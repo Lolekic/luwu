@@ -20,6 +20,8 @@ LUAU_DYNAMIC_FASTINT(LuauSubtypingRecursionLimit)
 LUAU_FASTINT(LuauTypeInferRecursionLimit)
 LUAU_FASTFLAG(DebugLuauUserDefinedClasses)
 LUAU_FASTFLAG(LuwuBetterUserDefinedClasses)
+LUAU_FASTFLAG(LuauExportValueSyntax)
+LUAU_FASTFLAG(LuauExportValueTypecheck)
 LUAU_FASTFLAG(LuauAutocompleteFunctionArglistSuggestion)
 LUAU_FASTFLAG(LuauAutocompleteMetatableInheritance)
 LUAU_FASTFLAG(LuauCheckTypeForDeprecated)
@@ -1085,6 +1087,56 @@ TEST_CASE_FIXTURE(ACFixture, "autocomplete_class_member_position_hides_private_w
     auto ac = autocomplete('1');
     CHECK_EQ(ac.entryMap.count("public"), 1);
     CHECK_EQ(ac.entryMap.count("private"), 0);
+}
+
+TEST_CASE_FIXTURE(ACBuiltinsFixture, "autocomplete_offers_private_class_members_only_inside_their_class")
+{
+    ScopedFastFlag sffs[] = {
+        {FFlag::DebugLuauUserDefinedClasses, true},
+        {FFlag::LuwuBetterUserDefinedClasses, true},
+        {FFlag::LuauExportValueSyntax, true},
+        {FFlag::LuauExportValueTypecheck, true},
+    };
+
+    fileResolver.source["Module/A"] = R"(
+export class Secret
+    private key: string
+    public id: number
+    public function make(): Secret return Secret { key = "k", id = 1 } end
+    public function peek(self) return self.key end
+end
+    )";
+
+    getFrontend().check("Module/A");
+
+    // The cursor is inside `Secret`'s line range in Module/A, but in another module.
+    fileResolver.source["Module/B"] = R"(
+local aaa = require(script.Parent.A)
+local s = aaa.Secret.make()
+local k = s.
+    )";
+
+    auto outside = autocomplete("Module/B", Position{3, 12});
+    CHECK(outside.entryMap.count("id"));
+    CHECK_FALSE(outside.entryMap.count("key"));
+
+    auto inside = autocomplete("Module/A", Position{5, 43});
+    CHECK(inside.entryMap.count("id"));
+    CHECK(inside.entryMap.count("key"));
+}
+
+TEST_CASE_FIXTURE(ACFixture, "autocomplete_expected_type_of_an_overloaded_call_starts_at_its_first_argument")
+{
+    // An overloaded callee also resolves through its chosen overload; unlike a `__call`, nothing is
+    // passed ahead of the written arguments.
+    check(R"(
+        local f: ((mode: "left" | "right") -> ()) & ((n: number) -> ()) = nil :: any
+        f("@1left")
+    )");
+
+    auto ac = autocomplete('1');
+    CHECK(ac.entryMap.count("left"));
+    CHECK(ac.entryMap.count("right"));
 }
 
 TEST_CASE_FIXTURE(ACFixture, "autocomplete_end_of_do_block")

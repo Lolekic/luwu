@@ -6,6 +6,7 @@ FFlags:
 - DebugLuauUserDefinedClasses
 - DebugLuauUserDefinedClassesRuntime
 - LuwuGenericNominals (classes with generic parameters share the same type system mechanisms as extern types)
+- LuwuDefaultArguments (default values of primary constructor parameters)
 - DebugLuwuCompilerTrustsTypeAnnotations (or `--!trust` directive in code: enables compiler inlining of class methods based on type annotations being correct)
 
 ## Summary
@@ -182,7 +183,7 @@ The action of evaluating a class definition statement introduces a *class* value
 
 A `class` is a value that serves as a factory for instances of the class and as a namespace for any functions that are defined on the class.
 
-Class bindings are always `const` and `class` values are always frozen.
+Class bindings are always `const` and `class` values are always frozen. A `local` with the same name as a class shadows it, and the `LocalShadow` lint reports it.
 
 Accessing a nonexistent member of a class results in a runtime error.
 Similarly, attempting to access a field present on objects of this class (but not on the class itself), also raises a runtime error.
@@ -199,7 +200,7 @@ The top type of all classes is named `class`. `type()` and `typeof()` return `"c
 
 Objects, often referred to as "class instances", are a new type of value in the VM. Objects are lightweight, do not have an array portion, and may only have members with specific names.
 
-`pairs`, `ipairs` , `getmetatable`, and `setmetatable` all raise a runtime error when invoked on an object. Similarly, an object may not be iterated over unless its class implements `__iter`.
+`pairs`, `ipairs` , and `setmetatable` all raise a runtime error when invoked on an object, and `getmetatable` returns `nil`. Similarly, an object may not be iterated over unless its class implements `__iter`.
 
 Reading or writing a nonexistent class field raises a runtime error. This makes it easy to disambiguate between a nonexistent field and a field whose value is nil.
 
@@ -241,7 +242,7 @@ A previous version of this RFC introduced a `static` modifier. We choose to not 
 Class members may not be named `class`, `private`, `public`, `const`, `extends`, or `implements`; doing so is a syntax error.
 This is to reduce confusion, ambiguity, and to allow future keywords to be used in the class header/body position without breaking existing code.
 
-- When encountered in an unambiguously field/function shaped position, these error messages should read `Fields/functions are not allowed to be named <keyword>`.
+- When encountered in an unambiguously field/function shaped position, these error messages should read `Fields are not allowed to be named '<keyword>'` or `Functions are not allowed to be named '<keyword>'`.
 - When the `class` keyword is encountered and classes-related FFlags are not enabled, the syntax error should inform users that the classes feature is currently disabled.
 - When `extends` is encountered in the class header, the syntax error should inform users that inheritance is not supported in Luwu.
 - When `implements` is encountered in the class header, the syntax error should state that the `implements` keyword has not yet been implemented.
@@ -266,6 +267,7 @@ Methods are introduced with the familiar `function` keyword and follow existing 
 - All functions on a class via familiar `function` syntax are `const` and may not be mutated.
 - A function that doesn't take `self` as its first parameter is a static function.
 - A function that takes `self` as its first parameter is a method. The `self` parameter name is hardcoded, like in Rust.
+- A method's `self` is `const`: assigning to it is a compile error.
 
 Specifically:
 
@@ -314,13 +316,13 @@ To reduce ambiguity, if a class defines a field with any access specifier, then 
 
 ```luwu
 class Vector4
-    x: number -- SyntaxError: This class contains non-public members; add the `public` keyword here to prevent ambiguity
+    x: number -- SyntaxError: This class contains non-public members; put the 'public' or 'private' keyword in front of this field to prevent ambiguity
     y: number
     z: number
     private w: number
 end
 class Coord
-    public x: number -- SyntaxError: This class mixes explicit and implicit `public`. Remove `public` or add `public` or `private` to all other members to prevent ambiguity.
+    public x: number -- SyntaxError: This class mixes explicit and implicit 'public'; remove 'public' or add 'public' or 'private' to all other members to prevent ambiguity
     y: number
 end
 ```
@@ -366,7 +368,7 @@ const user = User { -- The default constructor can initialize private fields.
 If a class only has `private` fields and no functions, we raise a type error because such a class will not be usable.
 
 ```luwu
-class UseMe -- TypeError: this class cannot be used because it only has private fields
+class UseMe -- TypeError: This class cannot be used because it only has private fields
     private please: string
     private uses: number
 end
@@ -387,6 +389,8 @@ A class may define fields with default value expressions. The RHS of the default
 Like default function arguments, default class field expressions are re-evaluated and assigned every time before a constructor is invoked to make a new object of the class. This means that classes with non-constant default field value expressions are more expensive to instantiate than those without default values or with constant default values.
 
 We chose this behavior to prevent stale default arguments and to limit footguns such as Python's default function argument problem surrounding pass by reference data structures.
+
+A default value expression may construct its own class. Every form of construction evaluates all arguments first, then defaults.
 
 This means:
 
@@ -528,7 +532,7 @@ end
 
 class Box(
     public size: vector,
-    cat -- SyntaxError: Qualify this class field parameter as `public` or `private` to prevent ambiguity
+    cat -- SyntaxError: Qualify this class field parameter as 'public' or 'private' to prevent ambiguity
 ) end
 ```
 
@@ -562,7 +566,7 @@ class Frame(name, position, size, rounding = Rounding.default())
     public rounding: Rounding = rounding:clamp()
 end
 
--- SyntaxError: Field `position` at position 1 of class field parameters must be explicitly marked as `public` or `private` in the class parameter list or the class body
+-- SyntaxError: Field 'position' at position 1 of class field parameters must be explicitly marked as 'public' or 'private' in the class parameter list or the class body
 class Rectangle(position: vector, size: vector, id: number?) 
     private id
     public size
@@ -668,11 +672,11 @@ Any fields that would implicitly be initialized to `nil` by the primary construc
 ```luwu
 class Bottle()
     brand = "Coke"
-    top: Instance -- TypeError: this field will always be initialized to `nil` but is not marked as optional; consider providing a default field value, adding a class parameter of the same name, or marking the field as optional with `?`
+    top: Instance -- TypeError: Field 'top' will always be initialized to `nil` but is not marked as optional; consider providing a default field value, adding a class parameter of the same name, or marking the field as optional with `?`
 end
 ```
 
-Like the default table constructor, primary constructors also implicitly define an `__init` that may be called on the class or as a method on objects of the class. The behavior is identical to an equivalently defined `public/private function __init`. Calling this method is blocked when the class has any `const` fields.
+Like the default table constructor, primary constructors also implicitly define an `__init`. The behavior is identical to an equivalently defined `public/private function __init`, including that it cannot be read by name.
 
 Any calls to the primary constructor that do not match the constructor's type signature should obviously raise a TypeError in static analysis:
 
@@ -689,7 +693,7 @@ const packy = Package {
 
 To allow users to customize initialization logic, we propose a constructor function named `__init`. Among other influences, this is inspired by the similarly-named `__init__` from Python as well as the `__init` proposed in upstream Luau.
 
-When `Class(...args)` syntax is used to invoke the class constructor, the "magic box self allocator" in C allocates an uninitialized object of the class and passes it to `Class.__init(self, ...args)` as `self`.
+When `Class(...args)` syntax is used to invoke the class constructor, the "magic box self allocator" in C allocates an uninitialized object of the class and passes it to the class's `__init` as `self`, followed by `...args`.
 
 At runtime, all of `self`'s fields will be initialized to the field's default value if one is present, or `nil` if a default value is not specified, irrespective of type annotations.
 
@@ -701,7 +705,7 @@ Any values returned by `__init` will be ignored. The `Class()` expression then r
 
 If a user forgets to assign to a field in `__init`, a type error `"TypeError: constructor does not initialize field <name>"` is raised, but at runtime the field will be `nil`. Due to the difficulty of control flow analysis in the existing typesolver, this does not need to be implemented in this initial RFC implementation, and may be reapproached at a later date.
 
-Due to the nature of `__init`, `const` fields may be reassigned during `__init`. To prevent `const` fields from being arbitrarily reassigned after initial object construction, we prevent calling the `__init` constructor explicitly (via `self:__init(...)` or `Class.__init(self, ...)`) if the class has any `const` fields. Attempting to do so raises a runtime error. If a user obtains a class's `__init` using unconventional means, such as by calling `debug.info(1, "f")` to save the `__init` closure and call it later with a fully constructed `self`... just let them do it; the exact behavior of what happens in that case is left unspecified.
+Due to the nature of `__init`, `const` fields may be reassigned during `__init`. To prevent `const` fields from being arbitrarily reassigned after initial object construction, we prevent reading the `__init` constructor by name (via `self:__init(...)` or `Class.__init(self, ...)`) on any class, including through the C API. Attempting to do so raises a runtime error. If a user obtains a class's `__init` using unconventional means, such as by calling `debug.info(1, "f")` to save the `__init` closure and call it later with a fully constructed `self`... just let them do it; the exact behavior of what happens in that case is left unspecified.
 
 #### The Default (POD) Constructor
 
@@ -737,19 +741,7 @@ not explicitly provided or implicitly specified via default value.
 The default constructor is always `public`, and there is no way to mark it as private without explicitly
 redefining its semantics.
 
-The default constructor is a real function just like any other and so it can be explicitly invoked if desired.
-
-```luwu
-class Point
-    x: number
-    y: number
-
-    function reset(self)
-        -- note this modifies `self` in place, it doesn't allocate a new self
-        self:__init { x = 0, y = 0 }
-    end
-end
-```
+Like any `__init`, the default constructor cannot be invoked by name.
 
 #### `public` and `private` constructors
 
@@ -790,7 +782,7 @@ be instantiated otherwise.
 If a class has a `private` constructor, but no function in the class instantiates an object from that `private` constructor, a type error is raised:
 
 ```luwu
--- TypeError: this class can never be instantiated because its `__init` constructor is private and is never called; did you mean to return an instance of this class from a `public function` instead? Call the constructor to silence.
+-- TypeError: This class can never be instantiated because its constructor is private and is never called; did you mean to return an instance of this class from a `public function` instead? Call the constructor to silence
 class User
     public first_name: string
     public last_name: string
@@ -818,7 +810,7 @@ end
 Equivalently, with primary constructor syntax instead of an explicit `__init` constructor:
 
 ```luwu
--- TypeError: this class can never be instantiated because its constructor is private and is never called; did you mean to return an instance of this class from a `public function` instead? Call the constructor to silence.
+-- TypeError: This class can never be instantiated because its constructor is private and is never called; did you mean to return an instance of this class from a `public function` instead? Call the constructor to silence
 class User private (
     public first_name: string,
     public last_name: string,
@@ -1006,7 +998,7 @@ const taz = Cat { name = "Taz", age = 12 }
 taz:meow()
 ```
 
-We are allowing `Cat.__init` to be called outside even though doing so is not very useful in Luwu, to match upstream. Upstream is adding classical inheritance, which we don't want to do at all. We feel our implementation of classes without classical 'extends' style inheritance is simpler (we're adding traits next), is a better paradigm for dynamic and gradually-typed languages, and because it unlocks easier optimization opportunities for us. Unlike upstream, we feel that getting classes out there with full encapsulation is incredibly important.
+Unlike upstream, `Cat.__init` cannot be read or called by name. Upstream is adding classical inheritance, which we don't want to do at all. We feel our implementation of classes without classical 'extends' style inheritance is simpler (we're adding traits next), is a better paradigm for dynamic and gradually-typed languages, and because it unlocks easier optimization opportunities for us. Unlike upstream, we feel that getting classes out there with full encapsulation is incredibly important.
 
 Private fields are not required to be prefixed with an underscore like in upstream's proposed RFC, where `_` does what `#` does in JavaScript. This is because making `._` and `:_` actually *operators* only in class methods is a horrible and extremely cursed idea that breaks a fundamental expectation of accessing fields on tables everywhere else in the language. Any advantage this could have recouped has already been recouped; private field access is as fast as public field access in our implementation and is significantly faster than tables on read and write.
 

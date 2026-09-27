@@ -48,9 +48,10 @@ namespace Luau
 namespace
 {
 
-// Luwu Classes (rfcs/classes.md): `class` is a contextual keyword, so with the classes flags off a
-// class declaration parses as a nonsense expression statement and reports something about assignments.
-// Users have read that as "my Luwu build is broken", so say what is actually wrong.
+// Luwu Classes (rfcs/classes.md): with DebugLuauUserDefinedClasses off, upstream reports "Incomplete
+// statement: expected assignment or a function call" for `class X` (and for `export class X`). Luwu
+// reports this instead, whatever the other class flags are set to. `class Name` is never valid Luau, so
+// only the text of an error that upstream already reports changes.
 const char* const kClassesDisabledError =
     "Classes are currently disabled; enable the 'DebugLuauUserDefinedClasses', 'DebugLuauUserDefinedClassesRuntime' and "
     "'LuwuBetterUserDefinedClasses' fast flags to use 'class'";
@@ -551,7 +552,7 @@ AstStat* Parser::parseStat()
                 (current.type == Lexeme::Name && AstName(current.name) == "class"))
             {
                 // `export class` routes here with the classes feature off too, so that it reports the
-                // feature being disabled rather than 'export' wanting an identifier.
+                // feature being disabled.
                 return parseExportValue(expr->location, expr->location.begin, AstArray<AstAttr*>({nullptr, 0}));
             }
             else if (current.type == Lexeme::Name && AstName(current.name) == "type")
@@ -980,8 +981,7 @@ AstStatFunction* Parser::parseFunctionStat(const AstArray<AstAttr*>& attributes,
 
     if (!isExprLValue(expr))
     {
-        expr = FFlag::LuauExportValueSyntax ? reportLValueError(expr)
-                                            : reportExprError(expr->location, copy({expr}), "Assigned expression must be a variable or a field");
+        expr = reportLValueError(expr);
     }
 
     matchRecoveryStopOnToken[Lexeme::ReservedEnd]++;
@@ -1289,6 +1289,22 @@ AstArray<AstAttr*> Parser::parseAttributes(TempVector<CstAttrList*>* cstAttrList
     return copy(attributes);
 }
 
+AstArray<AstAttr*> Parser::concatAttributes(const AstArray<AstAttr*>& first, const AstArray<AstAttr*>& second)
+{
+    if (first.size == 0)
+        return second;
+    if (second.size == 0)
+        return first;
+
+    TempVector<AstAttr*> merged(scratchAttr);
+    for (AstAttr* attr : first)
+        merged.push_back(attr);
+    for (AstAttr* attr : second)
+        merged.push_back(attr);
+
+    return copy(merged);
+}
+
 Location Parser::getAttributeStartLocation(
     const AstArray<AstAttr*>& attributes,
     const TempVector<CstAttrList*>* cstAttrLists,
@@ -1426,12 +1442,11 @@ AstStat* Parser::parseLocal(
         Position functionKeywordPosition = matchFunction.location.begin;
         Location functionKeywordLocation = matchFunction.location;
 
-        // For the closing 'end' indentation-mismatch diagnostic only, match against the column
-        // where 'local'/'const' starts rather than 'function' -- but do this on a separate copy,
-        // not `matchFunction` itself, since `matchFunction.location` is also used below as the
-        // real, unadjusted 'function' keyword location for the resulting AstExprFunction (and its
-        // CST node); mutating it in place used to corrupt that location, making the function
-        // expression's span start at 'local'/'const' instead of 'function'.
+        // The closing 'end' indentation-mismatch diagnostic matches against the column where
+        // 'local'/'const' starts rather than 'function', so it gets a patched copy of the token.
+        // Luwu: upstream patches `matchFunction` itself, which parseFunctionBody also takes the
+        // AstExprFunction's start from, so upstream's function expression starts at 'local'/'const'.
+        // Luwu's starts at 'function', so keyword hovers can tell the tokens apart by location.
         Lexeme endMatchLexeme = matchFunction;
         if (endMatchLexeme.location.begin.line == start.begin.line)
             endMatchLexeme.location.begin.column = start.begin.column;
@@ -1634,9 +1649,6 @@ const std::unordered_set<std::string> EXPLICITLY_DISALLOWED_METAMETHODS{
 
 } // namespace
 
-// classStatement ::= `class` Name classProps `end`
-// classProps ::= classProp [classProps]
-// classProp ::= name [: classQualifier* type]
 // Luwu Classes (rfcs/classes.md): parse the parameter list of a class's primary constructor, e.g. the
 // `(name: string, age = 0)` of `class Cat(name: string, age = 0)`. Each parameter implicitly declares
 // a field of the same name (public and mutable unless qualified), and the whole list is compiled into a synthesized `__init`.
@@ -1801,6 +1813,12 @@ bool Parser::classBodyLooksLikeStatement()
     return next == '(' || next == '.' || next == ',' || next == '[';
 }
 
+// classStatement ::= [`export'] `class' Name [`<' GenericTypeListWithDefaults `>'] [primaryCtor] {classMember} `end'
+// primaryCtor ::= [access] `(' [ctorParam {`,' ctorParam}] `)'
+// ctorParam ::= [access] [`const'] Name [`:' Type] [`=' exp]
+// classMember ::= [access] [`const'] Name [`:' Type] [`=' exp] [`;']
+//              | {attribute} [access] {attribute} `function' Name funcbody [`;']
+// access ::= `public' | `private'
 LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool exported, const Location& classKeywordLocation)
 {
     LUAU_ASSERT(FFlag::DebugLuauUserDefinedClasses);
@@ -2083,16 +2101,8 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
 
                 // Report and keep going: both lists are still kept on the function, so the member
                 // behaves as written and the CST has an entry for every attribute it prints.
-                AstArray<AstAttr*> before = attributes;
                 AstArray<AstAttr*> after = parseAttributes(FFlag::LuauCstAttr ? &cstAttrLists : nullptr);
-
-                TempVector<AstAttr*> merged(scratchAttr);
-                for (AstAttr* attr : before)
-                    merged.push_back(attr);
-                for (AstAttr* attr : after)
-                    merged.push_back(attr);
-
-                attributes = copy(merged);
+                attributes = concatAttributes(attributes, after);
             }
             else
                 parseMemberAttributes();
@@ -2285,7 +2295,15 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
             matchRecoveryStopOnToken[Lexeme::ReservedEnd]++;
 
             auto [body, _] = parseFunctionBody(
-                false, matchFunction, name.name, nullptr, attributes, /* isConst= */ false, FFlag::LuauCstAttr ? &cstAttrLists : nullptr
+                false,
+                matchFunction,
+                name.name,
+                nullptr,
+                attributes,
+                /* isConst= */ false,
+                FFlag::LuauCstAttr ? &cstAttrLists : nullptr,
+                /* endMatchLexeme= */ nullptr,
+                /* isClassFunction= */ true
             );
 
             matchRecoveryStopOnToken[Lexeme::ReservedEnd]--;
@@ -2432,7 +2450,8 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
     // TODO: We should use `expectMatchEndAndConsume`. It is difficult as we
     // are treating "class" as a contextual keyword (and we must as we also)
     // plan to add a `class` library.
-    Location end = lexer.current().location;
+    // An unterminated class ends at its last member, not at the statement that follows it.
+    Location end = unterminated ? lexer.previousLocation() : lexer.current().location;
     bool hasEnd = unterminated ? false : expectAndConsume(Lexeme::ReservedEnd, "class");
     Location location{start, end};
 
@@ -2845,6 +2864,9 @@ AstStat* Parser::parseDeclaration(const Location& start, const AstArray<AstAttr*
     }
 }
 
+// Luwu: upstream (still at 0.738) names the const variable only under LuauExportValueSyntax, and reports
+// "Assigned expression must be a variable or a field" otherwise. Luwu always calls this, so the error
+// names the variable (a class method's const `self` exists whatever that flag is).
 AstExprError* Parser::reportLValueError(AstExpr* expr)
 {
     if (expr->is<AstExprLocal>() && expr->as<AstExprLocal>()->local->isConst)
@@ -2873,9 +2895,7 @@ AstExprError* Parser::reportLValueError(AstExpr* expr)
 AstStat* Parser::parseAssignment(AstExpr* initial)
 {
     if (!isExprLValue(initial))
-        initial = FFlag::LuauExportValueSyntax
-                      ? reportLValueError(initial)
-                      : reportExprError(initial->location, copy({initial}), "Assigned expression must be a variable or a field");
+        initial = reportLValueError(initial);
 
     TempVector<AstExpr*> vars(scratchExpr);
     TempVector<Position> varsCommaPositions(scratchPosition);
@@ -2890,8 +2910,7 @@ AstStat* Parser::parseAssignment(AstExpr* initial)
         AstExpr* expr = parsePrimaryExpr(/* asStatement= */ true);
 
         if (!isExprLValue(expr))
-            expr = FFlag::LuauExportValueSyntax ? reportLValueError(expr)
-                                                : reportExprError(expr->location, copy({expr}), "Assigned expression must be a variable or a field");
+            expr = reportLValueError(expr);
 
         vars.push_back(expr);
     }
@@ -3034,9 +3053,7 @@ AstStat* Parser::parseCompoundAssignment(AstExpr* initial, AstExprBinary::Op op)
 {
     if (!isExprLValue(initial))
     {
-        initial = FFlag::LuauExportValueSyntax
-                      ? reportLValueError(initial)
-                      : reportExprError(initial->location, copy({initial}), "Assigned expression must be a variable or a field");
+        initial = reportLValueError(initial);
     }
 
     Position opPosition = lexer.current().location.begin;
@@ -3079,7 +3096,8 @@ std::pair<AstExprFunction*, AstLocal*> Parser::parseFunctionBody(
     const AstArray<AstAttr*>& attributes,
     const bool isConst,
     TempVector<CstAttrList*>* cstAttrLists,
-    const Lexeme* endMatchLexeme
+    const Lexeme* endMatchLexeme,
+    bool isClassFunction
 )
 {
     LUAU_ASSERT(cstAttrLists != nullptr ? FFlag::LuauCstAttr : true);
@@ -3164,6 +3182,12 @@ std::pair<AstExprFunction*, AstLocal*> Parser::parseFunctionBody(
     functionStack.emplace_back(fun);
 
     auto [self, vars, varsDefaults] = prepareFunctionArguments(start, hasself, args);
+
+    // Luwu Classes (rfcs/classes.md): a method's `self` is const, so every write to it (assignment,
+    // `function self()`, a write from a nested closure) is rejected like a write to any const local.
+    // Field writes (`self.x = v`) and a new `local self` are unaffected.
+    if (isClassFunction && vars.size > 0 && vars.data[0]->name == "self")
+        vars.data[0]->isConst = true;
 
     AstStatBlock* body = parseBlock();
 
@@ -5886,11 +5910,9 @@ AstLocal* Parser::pushLocal(const Binding& binding)
 // Luwu Classes (rfcs/classes.md): bring a class's primary constructor parameters into scope for a
 // field initializer expression, the only place they are visible. Their AstLocals were created once,
 // at the depth of the synthesized `__init`, by parseClassPrimaryConstructor; this re-enters them into
-// the scope chain so restoreLocals can take them back out.
-unsigned int Parser::pushClassPrimaryConstructorParams(AstClassPrimaryConstructor* primaryConstructor)
+// the scope chain, and the caller's restoreLocals takes them back out.
+void Parser::pushClassPrimaryConstructorParams(AstClassPrimaryConstructor* primaryConstructor)
 {
-    unsigned int localsBegin = saveLocals();
-
     for (AstLocal* arg : primaryConstructor->args)
     {
         AstLocal*& local = localMap[arg->name];
@@ -5899,8 +5921,6 @@ unsigned int Parser::pushClassPrimaryConstructorParams(AstClassPrimaryConstructo
 
         localStack.push_back(arg);
     }
-
-    return localsBegin;
 }
 
 unsigned int Parser::saveLocals()

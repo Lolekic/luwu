@@ -170,6 +170,9 @@ private:
     // attributes ::= {attribute}
     AstArray<AstAttr*> parseAttributes(TempVector<CstAttrList*>* cstAttrLists = nullptr);
 
+    // `first` followed by `second`, for attributes written on both sides of an access specifier.
+    AstArray<AstAttr*> concatAttributes(const AstArray<AstAttr*>& first, const AstArray<AstAttr*>& second);
+
     // attributes local function Name funcbody
     // attributes function funcname funcbody
     // attributes `declare function' Name`(' [parlist] `)' [`:` Type]
@@ -202,9 +205,9 @@ private:
     // `(name: string, age = 0)` of `class Cat(name: string, age = 0)`.
     AstClassPrimaryConstructor* parseClassPrimaryConstructor(const std::optional<Location>& qualifierLocation, AstClassMemberVisibility visibility);
 
-    // Brings a primary constructor's parameters into scope, returning the offset to pass to
-    // restoreLocals once the expression that needed them has been parsed.
-    unsigned int pushClassPrimaryConstructorParams(AstClassPrimaryConstructor* primaryConstructor);
+    // Brings a primary constructor's parameters into scope; the caller takes a saveLocals() offset
+    // first and passes it to restoreLocals once the expression that needed them has been parsed.
+    void pushClassPrimaryConstructorParams(AstClassPrimaryConstructor* primaryConstructor);
 
     // type function Name ... end
     AstStat* parseTypeFunction(const Location& start, bool exported, Position typeKeywordPosition);
@@ -248,7 +251,10 @@ private:
         // 'local'/'const' instead) pass a separate lexeme here rather than mutating `matchFunction`,
         // since `matchFunction.location` is also used as the real, unadjusted 'function' keyword
         // location for the resulting AstExprFunction and its CST node.
-        const Lexeme* endMatchLexeme = nullptr
+        const Lexeme* endMatchLexeme = nullptr,
+        // Luwu Classes (rfcs/classes.md): set for a class function, whose first parameter, when named
+        // `self`, is bound const.
+        bool isClassFunction = false
     );
 
     // explist ::= {exp `,'} exp

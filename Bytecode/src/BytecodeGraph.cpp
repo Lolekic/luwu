@@ -167,6 +167,37 @@ std::optional<CompTimeBcFunction> fromFunctionBytecode(std::string bytecode, std
             fn.constants[i].valueInteger = isNegative ? (int64_t)(~magnitude + 1) : (int64_t)magnitude;
             break;
         }
+
+        case LBC_CONSTANT_CLASS_SHAPE:
+        {
+            fn.constants[i].kind = BcVmConstKind::ClassShape;
+            fn.constants[i].valueClassShape = uint32_t(fn.classShapes.size());
+
+            // the layout BytecodeBuilder::writeClassShape writes
+            BytecodeBuilder::ClassShape shape;
+            shape.className = readVarInt(data, offset);
+            uint32_t propertyCount = readVarInt(data, offset);
+            uint32_t methodCount = readVarInt(data, offset);
+
+            for (uint32_t j = 0; j < propertyCount; ++j)
+            {
+                shape.propertyNames.push_back(readVarInt(data, offset));
+                shape.propertyFlags.push_back(uint8_t(readVarInt(data, offset)));
+                shape.propertyDefaults.push_back(
+                    (shape.propertyFlags.back() & LBC_CLASSMEMBER_CONSTDEFAULT) ? int32_t(readVarInt(data, offset)) : -1
+                );
+            }
+
+            for (uint32_t j = 0; j < methodCount; ++j)
+            {
+                shape.methodNames.push_back(readVarInt(data, offset));
+                shape.methodFlags.push_back(uint8_t(readVarInt(data, offset)));
+            }
+
+            fn.classShapes.push_back(std::move(shape));
+            break;
+        }
+
         default:
             LUAU_ASSERT(!"Unknown constant type!");
         }
@@ -346,6 +377,11 @@ std::string toFunctionBytecode(BytecodeBuilder& bcb, CompTimeBcFunction& fn)
 
         case BcVmConstKind::Integer:
             consts.push_back(bcb.addConstantInteger(c.valueInteger));
+            break;
+
+        case BcVmConstKind::ClassShape:
+            LUAU_ASSERT(c.valueClassShape < fn.classShapes.size());
+            consts.push_back(bcb.addClassShape(fn.classShapes[c.valueClassShape]));
             break;
         }
     }

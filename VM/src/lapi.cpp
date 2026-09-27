@@ -993,7 +993,8 @@ int lua_getmetatable(lua_State* L, int objindex)
     case LUA_TOBJECT:
     case LUA_TCLASS:
         // Luwu Classes (rfcs/classes.md): class and object metatables are locked down and never
-        // exposed, so these behave like a primitive without a metatable (such as `number`).
+        // exposed, so these behave like a primitive without a metatable (such as `number`). Upstream
+        // returns an object's class's instance metatable, and the global metatable of the type for a class.
         mt = NULL;
         break;
     default:
@@ -1134,7 +1135,8 @@ int lua_setmetatable(lua_State* L, int objindex)
     case LUA_TCLASS:
     {
         // Luwu Classes (rfcs/classes.md): the default case would install a metatable for every value
-        // of the type, which the language doesn't allow for classes and objects.
+        // of the type, which the language doesn't allow for classes and objects. Upstream takes the
+        // default case for both.
         luaG_runerror(L, "cannot set the metatable of a %s", luaT_typenames[ttype(obj)]);
     }
     default:
@@ -1741,16 +1743,24 @@ void lua_newobject(lua_State* L, int idx)
     luaC_threadbarrier(L);
 
     LuauClass* classdef = classvalue(cls);
-    const TValue* initoffset = luaH_getstr(classdef->memberstooffset, luaS_newlstr(L, "__init", 6));
-    LUAU_ASSERT(!ttisnil(initoffset));
-    const TValue* init = &classdef->staticmembers[uint32_t(nvalue(initoffset)) - classdef->numberofinstancemembers];
 
-    // `__init` is called directly rather than through the class's `__call`, which skips the private
-    // constructor check (the embedder is trusted) and reads `__init` without a member access (so a class
-    // with `const` fields can still be constructed). The object takes the class's stack slot, so it is
-    // anchored for the call and ends up exactly where the class was once the arguments are dropped.
+    // Construction runs here rather than through the class's `__call`, which skips the private
+    // constructor check (the embedder is trusted) and reads `__init` by offset rather than as a member
+    // (it is never readable by name). The object takes the class's stack slot, so it is anchored for
+    // construction and ends up exactly where the class was once the arguments are dropped.
     ptrdiff_t objectslot = savestack(L, cls);
-    setobjectvalue(L, cls, luaR_newobject(L, classdef));
+    LuauObject* object = luaR_newobject(L, classdef);
+    setobjectvalue(L, cls, object);
+
+    if (!classdef->hascustominit)
+    {
+        // an object argument's private fields are read with the embedder's rights, like any access it makes
+        luaR_initpodobject(L, classdef, object, cls + 1, nargs, NULL);
+        L->top = restorestack(L, objectslot) + 1;
+        return;
+    }
+
+    const TValue* init = &classdef->staticmembers[classdef->initoffset - classdef->numberofinstancemembers];
 
     if (!lua_checkstack(L, 2 + nargs))
         luaG_runerror(L, "stack overflow (class constructor arguments)");

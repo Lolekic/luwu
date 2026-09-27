@@ -1969,6 +1969,7 @@ void BytecodeBuilder::validateInstructions() const
             VREG(LUAU_INSN_A(insn));
             VJUMP(LUAU_INSN_D(insn));
             VREG(insns[i + 1] & 0xff); // class register lives in the low byte of aux
+            LUAU_ASSERT((insns[i + 1] & ~(0xffu | LBC_JUMPXISA_JUMPIFINSTANCE | LBC_JUMPXISA_CHECKCLASS)) == 0);
             break;
 
         case LOP_GETOBJECTMEMBER:
@@ -1978,9 +1979,10 @@ void BytecodeBuilder::validateInstructions() const
             break;
 
         case LOP_NEWOBJECT:
+            LUAU_ASSERT(LUAU_INSN_C(insn) <= LBC_NEWOBJECT_FIELDS);
             // with a user __init the instruction lays out `__init`, `self` and the arguments above A;
             // the other forms use one register per argument or per field
-            VREG(LUAU_INSN_A(insn) + (LUAU_INSN_C(insn) == 1 ? 2 : 0) + insns[i + 1]);
+            VREG(LUAU_INSN_A(insn) + (LUAU_INSN_C(insn) == LBC_NEWOBJECT_INIT ? 2 : 0) + insns[i + 1]);
             VREG(LUAU_INSN_B(insn));
             break;
 
@@ -2770,7 +2772,7 @@ void BytecodeBuilder::dumpInstruction(const uint32_t* code, std::string& result,
             LUAU_INSN_A(insn),
             *code & 0xff,
             targetLabel,
-            (*code >> 31) ? "" : " NOT",
+            (*code & LBC_JUMPXISA_JUMPIFINSTANCE) ? "" : " NOT",
             (*code & LBC_JUMPXISA_CHECKCLASS) ? " CHECKCLASS" : ""
         );
         break;
@@ -2785,7 +2787,7 @@ void BytecodeBuilder::dumpInstruction(const uint32_t* code, std::string& result,
 
     case LOP_NEWOBJECT:
     {
-        const char* form = LUAU_INSN_C(insn) == 1 ? " INIT" : (LUAU_INSN_C(insn) == 2 ? " FIELDS" : "");
+        const char* form = LUAU_INSN_C(insn) == LBC_NEWOBJECT_INIT ? " INIT" : (LUAU_INSN_C(insn) == LBC_NEWOBJECT_FIELDS ? " FIELDS" : "");
         formatAppend(result, "NEWOBJECT R%d R%d %d%s\n", LUAU_INSN_A(insn), LUAU_INSN_B(insn), *code++, form);
         break;
     }

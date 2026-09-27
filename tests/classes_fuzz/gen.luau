@@ -282,7 +282,8 @@ local function generate(seed: number): (string, string)
                 "return nil",
             }, { `other: {c.name}` }, false, {}
         elseif shape == "construct" then
-            return { `local o = {ctorCall(c, c)}`, "return o:get()" }, {}, false, { "get" }
+            -- bound to a local: a multret `return o:get()` never inlines, and this is a construction-proven receiver
+            return { `local o = {ctorCall(c, c)}`, "local g = o:get()", "return g" }, {}, false, { "get" }
         elseif shape == "closure" then
             return { `local fn = function() return self.{rng.pick(c.fields).name} end`, "return fn()" }, {}, false, {}
         elseif shape == "loop" and #numFields > 0 then
@@ -308,7 +309,13 @@ local function generate(seed: number): (string, string)
             -- only yield inside a coroutine the program made: the CLI's main thread is yieldable too, and a yield
             -- there passes through pcall and ends the program. `shared` is one table for both modules (each module
             -- gets its own sandboxed globals, so a global wouldn't be visible in the other)
-            return { "if coroutine.running() ~= shared.mainThread then coroutine.yield(self:get()) end", "return 5" }, {}, false, { "get" }
+            return {
+                "if coroutine.running() ~= shared.mainThread then",
+                "    local g = self:get()",
+                "    coroutine.yield(g)",
+                "end",
+                "return 5",
+            }, {}, false, { "get" }
         elseif shape == "sumtable" and #tables > 0 then
             local f = tables[1]
             return {
@@ -326,7 +333,7 @@ local function generate(seed: number): (string, string)
         elseif shape == "lying" and #others > 0 then
             -- a receiver annotation that can lie: O2 inlines and raises, O1 dispatches dynamically
             local o = rng.pick(others)
-            return { `local y: {o.name} = x`, "return y:get()" }, { "x" }, true, {}
+            return { `local y: {o.name} = x`, "local g = y:get()", "return g" }, { "x" }, true, {}
         end
         return nil, nil, nil, nil
     end
@@ -500,7 +507,45 @@ local function generate(seed: number): (string, string)
             if kind == "construct" then
                 op(kind, { `local o = {make}`, "return o:describe()" })
             elseif kind == "ctor_outside" then
-                op(kind, { `local o = {ctorCall(c)}`, "return o:get()" })
+                -- A local initialized by constructing a class in this module is proven to be that class, so its
+                -- method calls inline with no self check at O2. Bound to a local, since a multret return never
+                -- inlines. The rebind forms write the local where the construction can no longer vouch for it:
+                -- any write, including one from a closure, must unprove it, or `c`'s body runs against the new
+                -- value unchecked.
+                local m = rng.pick(instanceMethods(c, rng.chance(0.85)))
+                local call = `o:{m.name}({callArgs(m)})`
+                local divergent = isSketchy(c, m.name)
+                local form = rng.pick({ "plain", "plain", "rebind", "rebind_closure", "rebind_after" })
+                local elsewhere = filter(classes, function(o)
+                    return o ~= c
+                end)
+                local other = if #elsewhere > 0 and rng.chance(0.75)
+                    then `{ref(rng.pick(elsewhere))}.make()`
+                    else rng.pick({ "tbl", "nil", "legacy" })
+
+                if form == "plain" then
+                    op(kind, { `local o = {ctorCall(c)}`, `local r = {call}`, "return r" }, divergent)
+                elseif form == "rebind" then
+                    op("ctor_rebind", { `local o = {ctorCall(c)}`, `o = {other}`, `local r = {call}`, "return r" }, divergent)
+                elseif form == "rebind_closure" then
+                    op("ctor_rebind_closure", {
+                        `local o = {ctorCall(c)}`,
+                        "local swap = function()",
+                        `    o = {other}`,
+                        "end",
+                        "swap()",
+                        `local r = {call}`,
+                        "return r",
+                    }, divergent)
+                else
+                    op("ctor_rebind_after", {
+                        `local o = {ctorCall(c)}`,
+                        `local r = {call}`,
+                        `o = {other}`,
+                        `local r2 = {call}`,
+                        "return r, r2",
+                    }, divergent)
+                end
             elseif kind == "read" then
                 op(kind, { `local o = {make}`, `return o.{rng.pick(c.fields).name}` })
             elseif kind == "write" then
@@ -694,7 +739,13 @@ local function generate(seed: number): (string, string)
                 })
                 op(kind, { `local o, o2 = {make}, {make}`, `return {expr}` })
             elseif kind == "init_explicit" then
-                op(kind, { `local o = {make}`, "o:__init()", "return o:get()" })
+                -- `__init` is never readable by name, so this must raise the same error at every level and in every
+                -- codegen mode; the result reports whether it raised and with which message, which the runner compares
+                op(kind, {
+                    `local o = {make}`,
+                    `local ok, err = pcall(function() o:__init() end)`,
+                    `return ok, not ok and string.find(tostring(err), "'__init' of '{c.name}' cannot be accessed or called explicitly", 1, true) ~= nil`,
+                })
             elseif kind == "coroutine" then
                 op(kind, {
                     `local o = {make}`,

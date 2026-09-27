@@ -2581,7 +2581,9 @@ static TypeFunctionReductionResult<TypeId> classValueHelper(TypeId targetTy, Not
         std::vector<TypeId> options{};
         options.reserve(ut->options.size());
 
-        for (TypeId option : ut->options)
+        // UnionTypeIterator flattens nested unions (and stops on one that contains itself), so the
+        // recursion below never reaches this branch again.
+        for (TypeId option : ut)
         {
             TypeFunctionReductionResult<TypeId> result = classValueHelper(option, ctx);
 

@@ -134,8 +134,14 @@ local function luauArgs(config: Config): { string }
     return list
 end
 
+-- canonicalize returns a verbatim `\\?\C:\...` path on Windows; process.spawn takes it, but it reads badly in a
+-- command meant for copying
+local function displayPath(path: string): string
+    return if str.startswith(path, "\\\\?\\") then string.sub(path, 5) else path
+end
+
 local function rerunCommand(seed: number, config: Config): string
-    return `cd {seedDir(seed)} && {luau} {table.concat(luauArgs(config), " ")}`
+    return `cd {displayPath(seedDir(seed))} && {displayPath(luau)} {table.concat(luauArgs(config), " ")}`
 end
 
 -- generate --------------------------------------------------------------------------------------------------------
@@ -351,6 +357,11 @@ for seed = firstSeed, firstSeed + seedCount - 1 do
     elseif not keepAll then
         fs.removetree(seedDir(seed))
     end
+end
+
+-- the work directory itself goes too once nothing in it is worth keeping
+if not keepAll and #fs.listdir(work) == 0 then
+    fs.removetree(work)
 end
 
 const runCount = seedCount * #configs

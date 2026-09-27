@@ -1237,7 +1237,8 @@ static int luauF_getmetatable(lua_State* L, StkId res, TValue* arg0, int nresult
         else if (ttisuserdata(arg0))
             mt = uvalue(arg0)->metatable;
         else if (ttisobject(arg0) || ttisclass(arg0))
-            mt = NULL; // Luwu Classes (rfcs/classes.md): never exposed, see lua_getmetatable
+            // Luwu Classes (rfcs/classes.md): never exposed, see lua_getmetatable; upstream reads the type's global metatable
+            mt = NULL;
         else
             mt = L->global->mt[ttype(arg0)];
 

@@ -108,7 +108,6 @@ bool isSkipC(LuauOpcode op)
     switch (int(op))
     {
     case LOP_LOADB:
-    case LOP_CHECKSELFCLASS:
         return true;
 
     default:

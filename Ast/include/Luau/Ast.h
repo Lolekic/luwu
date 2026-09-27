@@ -1303,7 +1303,7 @@ public:
 
     void visit(AstVisitor* visitor) override;
 
-    // Location of the leading 'class'/'object' keyword token only.
+    // Location of the leading 'class' keyword token only (not 'export').
     Location keywordLocation;
 };
 

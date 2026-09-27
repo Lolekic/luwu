@@ -24,6 +24,9 @@ LUAI_FUNC const TValue* luaV_tonumber(const TValue* obj, TValue* n);
 LUAI_FUNC const LUA_VECTOR_TYPE* luaV_tovector(const TValue* obj);
 LUAI_FUNC int luaV_tostring(lua_State* L, StkId obj);
 LUAI_FUNC void luaV_gettable(lua_State* L, const TValue* t, TValue* key, StkId val);
+// Luwu Classes (rfcs/classes.md): luaV_gettable with private members read on behalf of `accessor`
+// (NULL: native code) instead of the running frame's closure.
+LUAI_FUNC void luaV_gettablefor(lua_State* L, const TValue* t, TValue* key, StkId val, const Closure* accessor);
 LUAI_FUNC void luaV_settable(lua_State* L, const TValue* t, TValue* key, StkId val);
 LUAI_FUNC void luaV_concat(lua_State* L, int total, int last);
 LUAI_FUNC void luaV_getimport(lua_State* L, LuaTable* env, TValue* k, StkId res, uint32_t id, bool propagatenil);

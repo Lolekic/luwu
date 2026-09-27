@@ -2408,10 +2408,13 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "call_metamethod_checks_a_multret_final_argum
     )");
 
     LUAU_REQUIRE_ERROR_COUNT(2, result);
-    CHECK_EQ("number", toString(get<TypeMismatch>(result.errors[0])->wantedType));
-    CHECK_EQ("boolean", toString(get<TypeMismatch>(result.errors[0])->givenType));
-    CHECK_EQ("number", toString(get<TypeMismatch>(result.errors[1])->wantedType));
-    CHECK_EQ("boolean", toString(get<TypeMismatch>(result.errors[1])->givenType));
+    for (size_t i = 0; i < 2; ++i)
+    {
+        const TypeMismatch* err = get<TypeMismatch>(result.errors[i]);
+        REQUIRE(err);
+        CHECK_EQ("number", toString(err->wantedType));
+        CHECK_EQ("boolean", toString(err->givenType));
+    }
 }
 
 TEST_CASE_FIXTURE(Fixture, "generic_packs_are_not_variadic")
@@ -4453,8 +4456,13 @@ TEST_CASE_FIXTURE(Fixture, "default_argument_expression_is_typechecked")
     )");
 
     LUAU_REQUIRE_ERROR_COUNT(2, result);
-    CHECK_EQ("next_id", get<UnknownSymbol>(result.errors[0])->name);
-    CHECK_EQ("nope", get<UnknownSymbol>(result.errors[1])->name);
+    const char* expectedNames[] = {"next_id", "nope"};
+    for (size_t i = 0; i < 2; ++i)
+    {
+        const UnknownSymbol* err = get<UnknownSymbol>(result.errors[i]);
+        REQUIRE(err);
+        CHECK_EQ(expectedNames[i], err->name);
+    }
 }
 
 TEST_CASE_FIXTURE(Fixture, "default_argument_infers_parameter_type_string")

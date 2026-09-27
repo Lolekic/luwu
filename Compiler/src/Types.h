@@ -44,7 +44,13 @@ void buildTypeMap(
     const DenseHashMap<AstExprCall*, int>& builtinCalls,
     const DenseHashMap<AstName, Compile::Global>& globals,
     LibraryMemberTypeCallback libraryMemberTypeCb,
-    BytecodeBuilder& bytecode
+    BytecodeBuilder& bytecode,
+    // Luwu: what trackValues found, so an unannotated local takes its initializer's type only when it is never
+    // written; without it no unannotated local does
+    const DenseHashMap<AstLocal*, Compile::Variable>* variables = nullptr,
+    // whether a declared return type of a class's static method may type the call's result (see
+    // DebugLuwuCompilerTrustsTypeAnnotations)
+    bool trustsTypeAnnotations = false
 );
 
 } // namespace Luau

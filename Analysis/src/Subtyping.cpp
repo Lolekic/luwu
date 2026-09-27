@@ -2280,12 +2280,14 @@ SubtypingResult Subtyping::isCovariantWith(
         !subExternType->instantiatedTypeParams.empty())
     {
         SubtypingResult result{true};
+        bool anyUnsuppressedMismatch = false;
 
         for (size_t i = 0; i < subExternType->instantiatedTypeParams.size(); ++i)
         {
-            result.andAlso(
-                isInvariantWith(env, follow(subExternType->instantiatedTypeParams[i]), follow(superExternType->instantiatedTypeParams[i]), scope)
-            );
+            SubtypingResult argResult =
+                isInvariantWith(env, follow(subExternType->instantiatedTypeParams[i]), follow(superExternType->instantiatedTypeParams[i]), scope);
+            anyUnsuppressedMismatch |= !argResult.isSubtype && !argResult.isErrorSuppressing;
+            result.andAlso(std::move(argResult));
         }
 
         for (size_t i = 0; i < subExternType->instantiatedTypePackParams.size(); ++i)
@@ -2294,7 +2296,11 @@ SubtypingResult Subtyping::isCovariantWith(
                 return {false};
         }
 
-        if (result.isSubtype)
+        // An argument that only mismatches `any` (`A<any>` against `A<string>`) fails with the error
+        // suppressed, like the structural `{ v: any }` against `{ v: string }`. Any other mismatch
+        // fails without reasonings: their paths lead into type arguments, which the error
+        // explanation can't follow.
+        if (result.isSubtype || !anyUnsuppressedMismatch)
             return result;
     }
 

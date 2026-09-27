@@ -87,6 +87,11 @@ struct ClassDeclRecord
     // LuwuGenericNominals. Empty for non-generic classes.
     std::vector<GenericTypeDefinition> typeParams;
     std::vector<GenericTypePackDefinition> typePackParams;
+
+    // Luwu Classes (rfcs/classes.md): for a generic class, the type of each instance method as read
+    // through the class value, blocked until the method is generalized (see GeneralizationConstraint).
+    // A non-generic class shares the instance member's type instead.
+    DenseHashMap<AstName, TypeId> classValueMethodTypes{AstName{""}};
 };
 
 struct ConstraintGenerator

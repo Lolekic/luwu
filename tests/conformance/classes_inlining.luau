@@ -14,6 +14,14 @@
 -- must keep the call; 7 onwards cover bodies that inline and must behave exactly like the call.
 --
 -- MUST BE RUN AT -O2. At O1 the inliner never runs and every case here passes vacuously.
+--
+-- Runs twice, with DebugLuwuCompilerTrustsTypeAnnotations on and off (the `trustsAnnotations` global).
+-- Off, a receiver known only from a declared type (cases 7-11, 13 and the trusted half of 16) compiles to an
+-- ordinary NAMECALL, so those cases check that the call behaves as written. The only expectations that
+-- differ are the lying annotations (8 and 16): on, the inline site's CHECKSELFCLASS rejects the impostor;
+-- off, the call dispatches to whatever the object's own class has, as it would at O0.
+local trustsAnnotations: boolean = trustsAnnotations
+assert(type(trustsAnnotations) == "boolean", "run through ClassesInlining, which sets trustsAnnotations")
 
 local function expectpass(s, f)
     f()
@@ -210,8 +218,8 @@ expectpass("a method touching private fields only through self inlines into outs
 end)
 
 -- 8. an annotation that lies about the receiver still can't reach a private field at a constant offset:
--- the inline site's CHECKSELFCLASS rejects the object before the body runs, even when the impostor has
--- the same layout
+-- when the call is inlined (trustsAnnotations), the inline site's CHECKSELFCLASS rejects the object before
+-- the body runs, even when the impostor has the same layout; otherwise the NAMECALL finds no `peek` on it
 class Impostor(public count: number)
 end
 
@@ -223,7 +231,7 @@ end
 expectpass("a lying annotation is rejected before an inlined body reads a private field", function()
     local ok, result = pcall(peekCounter, Impostor(41))
     assert(not ok, `reading through a lying annotation must fail, got {result}`)
-    assert(string.find(result, "Counter", 1, true), result)
+    assert(string.find(result, if trustsAnnotations then "Counter" else "peek", 1, true), result)
 end)
 
 -- 9. bodies whose private access stays runtime-checked must keep the call and behave as written
@@ -380,9 +388,12 @@ expectpass("an unannotated construction-initialized local inlines its method cal
 end)
 
 expectpass("resolving a receiver through its construction does not grant private access", function()
-    local c = Counted { n = 0 }
+    -- constructed and called in the same function, and bound to a local: a multret `return c:bump(1)` never
+    -- inlines, so it would keep the NAMECALL (and its private check) with or without the privacy gate
     local ok, err = pcall(function()
-        return c:bump(1)
+        local c = Counted { n = 0 }
+        local r = c:bump(1)
+        return r
     end)
     assert(not ok, "a private method was callable from outside through an unannotated local")
     assert(string.find(err, "private", 1, true), err)
@@ -445,7 +456,8 @@ expectpass("a proven receiver still can't call a private method from outside", f
     local ok, err = pcall(function()
         local p = Refined { n = 1 }
         if class.isinstance(p, Refined) then
-            return p:hidden()
+            local r = p:hidden()
+            return r
         end
         return 0
     end)
@@ -454,25 +466,35 @@ expectpass("a proven receiver still can't call a private method from outside", f
 end)
 
 expectpass("the proof does not escape into a nested closure", function()
-    local function later(p)
-        if class.isinstance(p, Refined) then
-            return function()
-                return p:twice()
-            end
-        end
-        return function()
+    -- The closure is created inside the proven branch, but `p` is rewritten after the branch, where the
+    -- write can't reach a use in it -- so the branch keeps its proof (`now` inlines unchecked). The closure
+    -- runs later and sees the impostor: if the proof leaked into it, Refined's body would run unchecked
+    -- against an impostor with the same layout and answer 6 + 6 instead of 300 + 6.
+    local function later(p, replacement)
+        local f = function()
             return -1
         end
+        if class.isinstance(p, Refined) then
+            local now = p:twice()
+            f = function()
+                local r = p:twice()
+                return r + now
+            end
+        end
+        p = replacement
+        return f
     end
 
-    assert(later(Refined { n = 3 })() == 6)
-    assert(later(RefinedImpostor { n = 3 })() == -1)
+    assert(later(Refined { n = 3 }, Refined { n = 3 })() == 12)
+    local leaked = later(Refined { n = 3 }, RefinedImpostor { n = 3 })()
+    assert(leaked == 306, tostring(leaked))
+    assert(later(RefinedImpostor { n = 3 }, Refined { n = 3 })() == -1)
 end)
 
 -- 16. the two receiver tiers. A *proven* receiver (construction, `class.isinstance`, a method's own
 -- checked `self`) inlines with no CHECKSELFCLASS at the site; a *trusted* one (a declared local or field
--- type) inlines but keeps it, and that check is what makes a lying annotation raise. Both must produce
--- the same answers as an ordinary call.
+-- type) inlines only when trustsAnnotations, and keeps the check, which is what makes a lying annotation
+-- raise. Both must produce the same answers as an ordinary call.
 class Tier(public n: number)
     public function double(self): number
         return self.n * 2
@@ -510,9 +532,14 @@ expectpass("a trusted receiver keeps the check that makes a lying annotation rai
 
     -- nothing checks what a field actually holds, so the inline site's check has to
     h.inner = TierImpostor(3) :: any
-    local ok, err = pcall(h.viaField, h)
-    assert(not ok, "a lying field type reached an inlined body")
-    assert(string.find(err, "Tier", 1, true), err)
+    local ok, result = pcall(h.viaField, h)
+    if trustsAnnotations then
+        assert(not ok, "a lying field type reached an inlined body")
+        assert(string.find(result, "Tier", 1, true), result)
+    else
+        -- not inlined: the call dispatches on the object's own class
+        assert(ok and result == 3000, tostring(result))
+    end
 end)
 
 -- 17. the `class.isinstance` proof is bounded by the branch it guards, not by whether the local is ever

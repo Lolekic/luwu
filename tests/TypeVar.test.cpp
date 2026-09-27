@@ -2,6 +2,7 @@
 #include "Luau/Scope.h"
 #include "Luau/Type.h"
 #include "Luau/TypeInfer.h"
+#include "Luau/TypeUtils.h"
 #include "Luau/VisitType.h"
 
 #include "Fixture.h"
@@ -163,6 +164,19 @@ TEST_CASE_FIXTURE(Fixture, "UnionTypeIterator_with_empty_union")
 
     std::vector<TypeId> actual(begin(utv), end(utv));
     CHECK(actual.empty());
+}
+
+TEST_CASE_FIXTURE(Fixture, "describeOptionalOperands_stops_on_a_union_that_contains_itself")
+{
+    Type tv{UnionType{}};
+    UnionType* utv = getMutable<UnionType>(&tv);
+    utv->options.push_back(&tv);
+    utv->options.push_back(getBuiltins()->numberType);
+
+    CHECK_FALSE(describeOptionalOperands(&tv, std::nullopt));
+
+    utv->options.push_back(getBuiltins()->nilType);
+    CHECK(describeOptionalOperands(&tv, std::nullopt));
 }
 
 TEST_CASE_FIXTURE(Fixture, "UnionTypeIterator_with_only_cyclic_union")

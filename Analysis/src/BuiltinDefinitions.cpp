@@ -359,6 +359,10 @@ void makeVectorMetatable(NotNull<BuiltinTypes> builtinTypes)
     ExternType* vectorCls = getMutable<ExternType>(vectorTy);
     LUAU_ASSERT(vectorCls);
 
+    // Every GlobalTypes (the checker's and autocomplete's) calls this on the same shared `vector`.
+    if (vectorCls->metatable)
+        return;
+
     vectorCls->props["x"] = Property::readonly(numberType);
     vectorCls->props["y"] = Property::readonly(numberType);
     vectorCls->props["z"] = Property::readonly(numberType);
@@ -1910,21 +1914,9 @@ std::optional<WithPredicate<TypePackId>> MagicClassName::handleOldSolver(
 // Collects the distinct class names of `ty`, which must be a class type, an object type, or a union
 // of them. Returns false for anything else -- including the `class`/`object` top types themselves,
 // whose name isn't known -- so the caller can fall back to the declared `string`.
-static bool collectClassNames(NotNull<BuiltinTypes> builtinTypes, TypeId ty, std::vector<Name>& names)
+static bool collectClassName(NotNull<BuiltinTypes> builtinTypes, TypeId ty, std::vector<Name>& names)
 {
-    ty = follow(ty);
-
-    if (const UnionType* ut = get<UnionType>(ty))
-    {
-        for (TypeId option : ut->options)
-        {
-            if (!collectClassNames(builtinTypes, option, names))
-                return false;
-        }
-        return true;
-    }
-
-    const ExternType* etv = get<ExternType>(ty);
+    const ExternType* etv = get<ExternType>(follow(ty));
     if (!etv || !etv->root || (*etv->root != builtinTypes->classType && *etv->root != builtinTypes->objectType))
         return false;
 
@@ -1933,6 +1925,24 @@ static bool collectClassNames(NotNull<BuiltinTypes> builtinTypes, TypeId ty, std
         names.push_back(etv->name);
 
     return true;
+}
+
+static bool collectClassNames(NotNull<BuiltinTypes> builtinTypes, TypeId ty, std::vector<Name>& names)
+{
+    ty = follow(ty);
+
+    // UnionTypeIterator flattens nested unions and stops on a union that contains itself.
+    if (const UnionType* ut = get<UnionType>(ty))
+        return std::all_of(
+            begin(ut),
+            end(ut),
+            [&](TypeId option)
+            {
+                return collectClassName(builtinTypes, option, names);
+            }
+        );
+
+    return collectClassName(builtinTypes, ty, names);
 }
 
 bool MagicClassName::infer(const MagicFunctionCallContext& context)

@@ -55,6 +55,26 @@ namespace Luau
 using PrintLineProc = void (*)(const std::string&);
 extern PrintLineProc luauPrintLine;
 
+// Pushes a function expression onto TypeChecker2::enclosingFunctions for the lifetime of the instance.
+struct EnclosingFunctionPusher
+{
+    std::vector<const AstExprFunction*>& stack;
+
+    EnclosingFunctionPusher(std::vector<const AstExprFunction*>& stack, const AstExprFunction* fn)
+        : stack(stack)
+    {
+        stack.push_back(fn);
+    }
+
+    ~EnclosingFunctionPusher()
+    {
+        stack.pop_back();
+    }
+
+    EnclosingFunctionPusher(const EnclosingFunctionPusher&) = delete;
+    EnclosingFunctionPusher& operator=(const EnclosingFunctionPusher&) = delete;
+};
+
 /* Push a scope onto the end of a stack for the lifetime of the StackPusher instance.
  * TypeChecker2 uses this to maintain knowledge about which scope encloses every
  * given AstNode.
@@ -1504,9 +1524,12 @@ void TypeChecker2::visit(AstStatClass* stat)
 
         if (privateConstructor)
         {
+            // A local must be the class's own binding: a different local with the same name (another
+            // module's class of that name) doesn't construct this one. A global matches by name, since
+            // the parser makes a reference to the class from before its declaration a global.
             struct ConstructorCallFinder : AstVisitor
             {
-                AstName className;
+                AstLocal* classLocal = nullptr;
                 bool found = false;
 
                 bool visit(AstExprCall* call) override
@@ -1515,9 +1538,9 @@ void TypeChecker2::visit(AstStatClass* stat)
                     while (AstExprGroup* group = callee->as<AstExprGroup>())
                         callee = group->expr;
 
-                    if (AstExprGlobal* global = callee->as<AstExprGlobal>(); global && global->name == className)
+                    if (AstExprGlobal* global = callee->as<AstExprGlobal>(); global && global->name == classLocal->name)
                         found = true;
-                    else if (AstExprLocal* local = callee->as<AstExprLocal>(); local && local->local->name == className)
+                    else if (AstExprLocal* local = callee->as<AstExprLocal>(); local && local->local == classLocal)
                         found = true;
 
                     return !found;
@@ -1525,7 +1548,7 @@ void TypeChecker2::visit(AstStatClass* stat)
             };
 
             ConstructorCallFinder finder;
-            finder.className = stat->name->name;
+            finder.classLocal = stat->name;
 
             for (const AstClassMember& member : stat->members)
             {
@@ -1903,8 +1926,9 @@ void TypeChecker2::visitCall(AstExprCall* call)
         // `fnTy` isn't itself callable, so this call is dispatched through a
         // `__call` metamethod, which forwards `call->func` as its first
         // argument -- same as `self` above -- so param types need to be read
-        // starting from its second parameter.
-        if (auto callMm = findMetatableEntry(builtinTypes, module->errors, fnTy, "__call", call->func->location))
+        // starting from its second parameter. A bad metatable is reported by the solver already.
+        ErrorVec metatableErrors;
+        if (auto callMm = findMetatableEntry(builtinTypes, metatableErrors, fnTy, "__call", call->func->location))
         {
             fty = get<FunctionType>(follow(*callMm));
             if (fty)
@@ -2230,7 +2254,7 @@ void TypeChecker2::checkPrivatePropertyAccess(TypeId tableTy, const std::string&
         {
             // a class's functions are its only read-only members; its fields are always read-write,
             // even `const` ones (see ConstraintGenerator)
-            if (it->second.isPrivate && !(cls->definitionLocation && cls->definitionLocation->encloses(location)))
+            if (it->second.isPrivate && !isInsideClassDeclaration(cls, module->name, location))
                 reportError(PrivatePropertyAccess{tableTy, prop, it->second.isReadOnly(), cls->name}, location);
             return;
         }
@@ -2239,7 +2263,46 @@ void TypeChecker2::checkPrivatePropertyAccess(TypeId tableTy, const std::string&
     }
 }
 
-void TypeChecker2::checkConstPropertyAssignment(TypeId tableTy, const std::string& prop, ValueContext context, const Location& location)
+bool TypeChecker2::checkConstructorReadByName(TypeId tableTy, const std::string& prop, ValueContext context, const Location& location)
+{
+    if (!FFlag::DebugLuauUserDefinedClasses || !FFlag::LuwuBetterUserDefinedClasses)
+        return false;
+
+    if (context != ValueContext::RValue || prop != "__init")
+        return false;
+
+    const ExternType* cls = get<ExternType>(follow(tableTy));
+    const bool isClassOrObject = cls && (cls->root == builtinTypes->classType || cls->root == builtinTypes->objectType);
+    if (!isClassOrObject)
+        return false;
+
+    reportError(ConstructorReadByName{tableTy, cls->name}, location);
+    return true;
+}
+
+bool TypeChecker2::isInitWritingItsSelf(const ExternType* cls, const AstExpr* objectExpr) const
+{
+    // Mirrors the runtime rule: the running closure is the class's `__init` itself (a function nested
+    // in it is not), and the object is the one it is constructing, in its `self` parameter.
+    if (enclosingFunctions.empty() || !cls->initLocation || cls->definitionModuleName != module->name)
+        return false;
+
+    const AstExprFunction* fn = enclosingFunctions.back();
+    if (fn->location != *cls->initLocation)
+        return false;
+
+    const AstLocal* self = fn->self ? fn->self : (fn->args.size > 0 ? fn->args.data[0] : nullptr);
+    const AstExprLocal* object = objectExpr->as<AstExprLocal>();
+    return self && object && object->local == self;
+}
+
+void TypeChecker2::checkConstPropertyAssignment(
+    TypeId tableTy,
+    const AstExpr* objectExpr,
+    const std::string& prop,
+    ValueContext context,
+    const Location& location
+)
 {
     if (!FFlag::DebugLuauUserDefinedClasses || !FFlag::LuwuBetterUserDefinedClasses)
         return;
@@ -2253,7 +2316,7 @@ void TypeChecker2::checkConstPropertyAssignment(TypeId tableTy, const std::strin
         auto it = cls->props.find(prop);
         if (it != cls->props.end())
         {
-            if (it->second.isConst && !(cls->initLocation && cls->initLocation->encloses(location)))
+            if (it->second.isConst && !isInitWritingItsSelf(cls, objectExpr))
                 reportError(ConstPropertyAssignment{tableTy, prop, cls->name}, location);
             return;
         }
@@ -2283,7 +2346,7 @@ void TypeChecker2::checkPrivateConstructorAccess(TypeId classTy, const Location&
     if (it == instanceCls->props.end())
         return;
 
-    if (it->second.isPrivate && !(instanceCls->definitionLocation && instanceCls->definitionLocation->encloses(location)))
+    if (it->second.isPrivate && !isInsideClassDeclaration(instanceCls, module->name, location))
         reportError(PrivateConstructorAccess{classTy}, location);
 }
 
@@ -2292,8 +2355,10 @@ void TypeChecker2::visitExprName(AstExpr* expr, Location location, const std::st
     visit(expr, ValueContext::RValue);
     TypeId leftType = stripFromNilAndReport(lookupType(expr), location);
     checkIndexTypeFromType(leftType, propName, context, location, astIndexExprTy);
-    checkPrivatePropertyAccess(leftType, propName, location);
-    checkConstPropertyAssignment(leftType, propName, context, location);
+    const bool readsConstructor = checkConstructorReadByName(leftType, propName, context, location);
+    if (!readsConstructor)
+        checkPrivatePropertyAccess(leftType, propName, location);
+    checkConstPropertyAssignment(leftType, expr, propName, context, location);
 }
 
 void TypeChecker2::visit(AstExprIndexName* indexName, ValueContext context)
@@ -2408,6 +2473,8 @@ void TypeChecker2::visit(AstExprFunction* fn)
     InConditionalContext flipper(&typeContext, TypeContext::Default);
 
     auto StackPusher = pushStack(fn);
+
+    EnclosingFunctionPusher functionPusher{enclosingFunctions, fn};
 
     visitGenerics(fn->generics, fn->genericPacks);
 
@@ -3372,6 +3439,38 @@ void TypeChecker2::visit(AstTypeFunction* ty)
     visit(ty->returnTypes);
 }
 
+// The source spelling of a name or a chain of field reads (`Cat`, `a.Node`).
+static std::optional<std::string> spellNameExpr(const AstExpr* expr)
+{
+    if (const AstExprLocal* local = expr->as<AstExprLocal>())
+        return std::string(local->local->name.value);
+
+    if (const AstExprGlobal* global = expr->as<AstExprGlobal>())
+        return std::string(global->name.value);
+
+    if (const AstExprIndexName* index = expr->as<AstExprIndexName>())
+    {
+        if (std::optional<std::string> prefix = spellNameExpr(index->expr))
+            return *prefix + "." + index->index.value;
+    }
+
+    return std::nullopt;
+}
+
+void TypeChecker2::reportClassTypeofSpelling(AstTypeTypeof* ty, const std::string& className, TypeId objectTy)
+{
+    // The suggestion names the class's type only where that name resolves to it: an imported class
+    // or a shadowed name has no bare spelling here.
+    const Scope* scope = findInnermostScope(ty->location);
+    std::optional<TypeFun> named = scope ? scope->lookupType(className) : std::nullopt;
+    const bool nameable = named && follow(named->type) == follow(objectTy);
+
+    const std::string typeofText = "'typeof(" + spellNameExpr(ty->expr).value_or("...") + ")'";
+    const std::string classText = nameable ? "'class<" + className + ">'" : "'class<T>', where T is the type of '" + className + "' objects,";
+
+    reportError(GenericError{"Use " + classText + " instead of " + typeofText + " to get the class of '" + className + "'"}, ty->location);
+}
+
 void TypeChecker2::visit(AstTypeTypeof* ty)
 {
     visit(ty->expr, ValueContext::RValue);
@@ -3385,11 +3484,8 @@ void TypeChecker2::visit(AstTypeTypeof* ty)
         {
             if (auto klass = get<ExternType>(follow(*resolved)); klass && klass->root == builtinTypes->classType && klass->relation)
             {
-                if (klass->relation->get_if<Obj>())
-                    reportError(
-                        GenericError{"Use 'class<" + klass->name + ">' instead of 'typeof(" + klass->name + ")' to get the class of '" + klass->name + "'"},
-                        ty->location
-                    );
+                if (const Obj* obj = klass->relation->get_if<Obj>())
+                    reportClassTypeofSpelling(ty, klass->name, obj->ty);
             }
         }
     }

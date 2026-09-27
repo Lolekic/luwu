@@ -540,7 +540,7 @@ struct Compiler
                 // capture forced on a method that would otherwise have none (which would cost it
                 // DUPCLOSURE sharing). See LBC_SELFCLASS_OWNER. Inline sites cannot use this form --
                 // they run under the caller's proto -- and still pass a register.
-                emitSelfClassCheck(*selfCheck, args, LBC_SELFCLASS_OWNER, /* selfCall= */ false, func->location);
+                emitSelfClassCheck(selfCheck->methodName, args, LBC_SELFCLASS_OWNER, /* selfCall= */ false, func->location);
             }
         }
 
@@ -1043,6 +1043,17 @@ struct Compiler
             return false;
         }
 
+        // Luwu Classes (rfcs/classes.md): a `const` field may be written only by its class's `__init`, checked against
+        // the running closure. Inlined into `__init`, another function's write would pass that check.
+        if (FFlag::DebugLuauUserDefinedClasses && currentFunction)
+        {
+            if (AstStatClass* initClass = classOfInit(currentFunction); initClass && bodyMayWriteConstMember(func, initClass))
+            {
+                bytecode.addDebugRemark("inlining failed: body may write a const field of %s", initClass->name->name.value);
+                return false;
+            }
+        }
+
         // we can't inline multret functions because the caller expects L->top to be adjusted:
         // - inlined return compiles to a JUMP, and we don't have an instruction that adjusts L->top arbitrarily
         // - even if we did, right now all L->top adjustments are immediately consumed by the next instruction, and for now we want to preserve that
@@ -1200,8 +1211,8 @@ struct Compiler
 
     // Luwu Classes (rfcs/classes.md): the class of a receiver whose class is *proven* rather than
     // inferred -- the enclosing method's own `self`, which the method prologue's CHECKSELFCLASS has
-    // already established is an instance of the method's class, and which the method never reassigns;
-    // or an inlined method's `self` proven at its inline site (inlineProvenSelfClass).
+    // already established is an instance of the method's class, and which is const (the parser rejects
+    // every write to it); or an inlined method's `self` proven at its inline site (inlineProvenSelfClass).
     //
     // Deliberately not resolveReceiverClass: that one also believes type annotations, and an annotation
     // can lie (see the inlining tests). Nothing here trusts anything the runtime hasn't checked, which
@@ -1223,17 +1234,23 @@ struct Compiler
         if (!le || le->local != currentFunction->args.data[0])
             return nullptr;
 
-        // reassigning `self` invalidates what the prologue proved about it
-        if (Variable* v = variables.find(le->local); v && v->written)
-            return nullptr;
-
         // the proof is the prologue's check; a method without one proves nothing
         if (!classMethodSelfChecks.contains(currentFunction))
             return nullptr;
 
+        assertSelfIsConst(le->local);
+
         AstStatClass** owner = classMethodOwner.find(currentFunction);
 
         return owner ? *owner : nullptr;
+    }
+
+    // Luwu Classes (rfcs/classes.md): a method's `self` is const, so the parser has rejected every write to it
+    // and the proofs about it need no write tracking.
+    void assertSelfIsConst(AstLocal* self)
+    {
+        LUAU_ASSERT(self->isConst);
+        LUAU_ASSERT(!variables.contains(self) || !variables[self].written);
     }
 
     // Luwu Classes (rfcs/classes.md): the offset of an instance member within a class, which is its
@@ -1313,10 +1330,19 @@ struct Compiler
         return false;
     }
 
+    // Luwu Classes (rfcs/classes.md): is `le` a register of the frame being compiled? An upvalue is a
+    // different function's register, and a `class.isinstance` proof is about this frame only. A local of
+    // an inlined function's body is bound to a register of this frame like any other.
+    bool isFrameLocal(AstExprLocal* le)
+    {
+        return le && !le->upvalue && getLocalReg(le->local) >= 0;
+    }
+
     // Luwu Classes (rfcs/classes.md): the class a local is proven to be an exact instance of, because the code
-    // being compiled sits in the then-branch of `if class.isinstance(local, C)` for a statically known `C`,
-    // which compiles to JUMPXISA (see compileStatIf). Like provenSelfClass this trusts only the runtime check,
-    // never an annotation, and only while the local is never reassigned anywhere in the function.
+    // being compiled sits in a region guarded by `class.isinstance(local, C)` for a statically known `C`: the
+    // then-branch of an `if` (compileStatIf), or the statements after an `assert` (noteAssertProof). Like
+    // provenSelfClass this trusts only the runtime check, never an annotation, and the proof is refused when
+    // the region can write the local (matchIsinstanceProvenLocal, matchAssertIsinstanceProof).
     AstStatClass* provenIsinstanceClass(AstExpr* recv)
     {
         if (!FFlag::DebugLuauUserDefinedClasses || !currentFunction)
@@ -1324,8 +1350,7 @@ struct Compiler
 
         AstExprLocal* le = recv->as<AstExprLocal>();
 
-        // an upvalue is a different function's register; the proof is about this frame only
-        if (!le || le->upvalue || le->local->functionDepth != currentFunction->functionDepth)
+        if (!isFrameLocal(le))
             return nullptr;
 
         AstStatClass** decl = isinstanceProvenLocals.find(le->local);
@@ -1379,9 +1404,7 @@ struct Compiler
             if (it->caller != currentFunction)
                 return nullptr;
 
-            if (Variable* v = variables.find(le->local); v && v->written)
-                return nullptr;
-
+            assertSelfIsConst(le->local);
             return it->provenSelfClass;
         }
 
@@ -1449,98 +1472,173 @@ struct Compiler
         return visitor.found;
     }
 
-    // Luwu Classes (rfcs/classes.md): whether `method` of `cls`, inlined into code outside `cls`, behaves exactly as the
-    // call would. Private access is authorized at runtime against the *running* closure, which for inlined code is the
-    // caller's -- so any access in the body that stays runtime-checked and could reach one of cls's private members
-    // would wrongly raise. The body may touch private members only through its own proven `self` (compiled to a
-    // constant offset, no runtime check; see inlineProvenSelfClass). Refuses:
-    //  - a private member name on anything else, a private method or static (even on `self`), and a write to a
-    //    `const` private field (which stays runtime-checked);
-    //  - constructing cls through a private constructor (NEWOBJECT's check sees the caller);
-    //  - indexing with a runtime key (`x[k]`) unless `x` is known not to be an object: `k` could name a private
-    //    member. "Known" trusts declared table types (`inner: { T }`), so a declaration that lies can still make the
-    //    inlined body raise where the call wouldn't -- never the reverse;
-    //  - nested functions (tryCompileInlinedCall refuses those across classes anyway).
-    struct InlinedPrivateAccessVisitor : AstVisitor
+    // Luwu Classes (rfcs/classes.md): whether the member `name` of `cls` is private: a field (in the class body, or
+    // declared by a primary constructor parameter), a method or static, or `__init`, the constructor.
+    bool classMemberIsPrivate(AstStatClass* cls, AstName name)
     {
+        for (const AstClassMember& member : cls->members)
+        {
+            if (const AstClassProperty* prop = member.get_if<AstClassProperty>(); prop && prop->name == name)
+                return prop->visibility == AstClassMemberVisibility::Private;
+
+            if (const AstClassMethod* m = member.get_if<AstClassMethod>(); m && m->functionName == name)
+                return m->visibility == AstClassMemberVisibility::Private;
+        }
+
+        if (AstClassPrimaryConstructor* ctor = cls->primaryConstructor)
+        {
+            if (name == "__init")
+                return ctor->visibility == AstClassMemberVisibility::Private;
+
+            if (ctor->argsQualifiers.size == ctor->args.size)
+            {
+                for (size_t i = 0; i < ctor->args.size; i++)
+                    if (ctor->args.data[i]->name == name)
+                        return ctor->argsQualifiers.data[i].visibility == AstClassMemberVisibility::Private;
+            }
+        }
+
+        return false;
+    }
+
+    // Luwu Classes (rfcs/classes.md): whether the instance field `name` of `cls` is `const`, from the class body or a
+    // primary constructor parameter's qualifiers.
+    bool classMemberIsConst(AstStatClass* cls, AstName name)
+    {
+        if (const AstClassProperty* prop = findClassProperty(cls, name))
+            return prop->isConst;
+
+        if (AstClassPrimaryConstructor* ctor = cls->primaryConstructor; ctor && ctor->argsQualifiers.size == ctor->args.size)
+        {
+            for (size_t i = 0; i < ctor->args.size; i++)
+                if (ctor->args.data[i]->name == name)
+                    return ctor->argsQualifiers.data[i].isConst;
+        }
+
+        return false;
+    }
+
+    // Luwu Classes (rfcs/classes.md): the class `func` is the `__init` of (explicit or synthesized from a primary
+    // constructor), or null.
+    AstStatClass* classOfInit(AstExprFunction* func)
+    {
+        AstStatClass* cls = lexicalClassOf(func);
+
+        if (!cls)
+            return nullptr;
+
+        if (const AstClassMethod* init = findClassInit(cls); init && init->function == func)
+            return cls;
+
+        AstExprFunction* const* primaryInit = classPrimaryInitFn.find(cls);
+        return primaryInit && *primaryInit == func ? cls : nullptr;
+    }
+
+    // Luwu Classes (rfcs/classes.md): might `func`'s body write a `const` field of `cls`? A write with a runtime key
+    // might.
+    struct ConstFieldWriteVisitor : AssignmentVisitor
+    {
+        using AssignmentVisitor::visit;
+
         Compiler* self;
         AstStatClass* cls;
-        AstLocal* selfLocal;
-        bool selfWritten;
-        bool keeps = true;
-        DenseHashSet<AstExpr*> writeTargets{nullptr};
+        bool found = false;
 
-        InlinedPrivateAccessVisitor(Compiler* self, AstStatClass* cls, AstExprFunction* method)
+        ConstFieldWriteVisitor(Compiler* self, AstStatClass* cls)
             : self(self)
             , cls(cls)
-            , selfLocal(method->args.size > 0 && self->classMethodSelfChecks.contains(method) ? method->args.data[0] : nullptr)
-            , selfWritten(false)
         {
-            if (selfLocal)
-            {
-                Variable* v = self->variables.find(selfLocal);
-                selfWritten = v && v->written;
-            }
         }
 
-        bool isProvenSelf(AstExpr* expr)
+        void assign(AstExpr* var) override
         {
-            while (AstExprGroup* g = expr->as<AstExprGroup>())
-                expr = g->expr;
+            AstName key;
 
-            AstExprLocal* le = expr->as<AstExprLocal>();
-            return selfLocal && !selfWritten && le && !le->upvalue && le->local == selfLocal;
+            if (AstExprIndexName* idx = var->as<AstExprIndexName>())
+                found |= self->classMemberIsConst(cls, idx->index);
+            else if (AstExprIndexExpr* idx = var->as<AstExprIndexExpr>())
+                found |= !self->getConstantStringKey(idx->index, key) || self->classMemberIsConst(cls, key);
+
+            var->visit(this);
+        }
+    };
+
+    bool bodyMayWriteConstMember(AstExprFunction* func, AstStatClass* cls)
+    {
+        ConstFieldWriteVisitor visitor(this, cls);
+        func->body->visit(&visitor);
+
+        for (AstExpr* argDefault : func->argsDefaults)
+            if (argDefault)
+                argDefault->visit(&visitor);
+
+        return visitor.found;
+    }
+
+    bool classConstructorIsPrivate(AstStatClass* cls)
+    {
+        return classMemberIsPrivate(cls, names.getOrAdd("__init"));
+    }
+
+    // The member name an index key names when it is a string known at compile time.
+    bool getConstantStringKey(AstExpr* index, AstName& name)
+    {
+        if (AstExprConstantString* key = index->as<AstExprConstantString>())
+        {
+            name = names.getOrAdd(key->value.data, key->value.size);
+            return true;
         }
 
-        bool isPrivateName(AstName name)
+        if (const Constant* key = constants.find(index); key && key->type == Constant::Type_String)
         {
-            for (const AstClassMember& member : cls->members)
-            {
-                if (const AstClassProperty* prop = member.get_if<AstClassProperty>(); prop && prop->name == name)
-                    return prop->visibility == AstClassMemberVisibility::Private;
+            name = names.getOrAdd(key->valueString, key->stringLength);
+            return true;
+        }
 
-                if (const AstClassMethod* m = member.get_if<AstClassMethod>(); m && m->functionName == name)
-                    return m->visibility == AstClassMemberVisibility::Private;
-            }
+        return false;
+    }
 
-            if (AstClassPrimaryConstructor* ctor = cls->primaryConstructor)
-            {
-                if (name == "__init")
-                    return ctor->visibility == AstClassMemberVisibility::Private;
+    // Luwu Classes (rfcs/classes.md): a POD class's constructor reads an object argument's fields by name, with the
+    // private access of the nearest Lua frame. Code that is compiled into another frame than the one it was written
+    // in -- an inlined method body, a primary constructor's initializers compiled at the construction site -- sees
+    // that frame's access instead, so it may not hand anything that might be an object to anything that might be a
+    // POD construction: a POD class called directly, a POD class used as a value (`pcall(Pod, obj)`, an alias), or a
+    // callee the compiler can't identify. Sets `mayConstructPod` when it finds one.
+    //
+    // Subclasses say what else they know: which `x:name()` calls certainly reach a method, and which values a
+    // declaration says are not objects.
+    struct PodConstructionVisitor : AssignmentVisitor
+    {
+        using AssignmentVisitor::visit;
 
-                if (ctor->argsQualifiers.size == ctor->args.size)
-                {
-                    for (size_t i = 0; i < ctor->args.size; i++)
-                        if (ctor->args.data[i]->name == name)
-                            return ctor->argsQualifiers.data[i].visibility == AstClassMemberVisibility::Private;
-                }
-            }
+        Compiler* self;
+        bool mayConstructPod = false;
+        DenseHashSet<AstExpr*> podCallees{nullptr};
 
+        explicit PodConstructionVisitor(Compiler* self)
+            : self(self)
+        {
+        }
+
+        virtual bool callsKnownMethod(AstExprCall* call)
+        {
             return false;
         }
 
-        void checkNamedAccess(AstExpr* object, AstName name, AstExpr* node)
+        virtual bool isDeclaredNonObject(AstExpr* expr)
         {
-            if (!isPrivateName(name))
-                return;
-
-            bool isWrite = writeTargets.contains(node);
-
-            if (isProvenSelf(object) && self->classInstanceMemberOffset(cls, name, isWrite) >= 0)
-                return;
-
-            keeps = false;
+            return false;
         }
 
-        // A body that indexes with a runtime key (`self.inner[k]`) normally refuses to inline, because
-        // the key could name a private member. A declared table type on the indexed value rules that
-        // out: a table is not an object, so it has no private members to reach.
-        //
-        // Nothing verifies that declaration, so this is annotation trust like any other. With trust off
-        // it answers no, and such a body keeps its call.
-        bool isTableTyped(AstType* ty)
+        void assign(AstExpr* var) override
         {
-            return self->trustsTypeAnnotations() && ty && ty->is<AstTypeTable>();
+            var->visit(this);
+        }
+
+        static bool isComparison(AstExprBinary::Op op)
+        {
+            return op == AstExprBinary::CompareEq || op == AstExprBinary::CompareNe || op == AstExprBinary::CompareLt ||
+                   op == AstExprBinary::CompareLe || op == AstExprBinary::CompareGt || op == AstExprBinary::CompareGe;
         }
 
         bool isKnownNonObject(AstExpr* expr, int depth = 0)
@@ -1551,7 +1649,7 @@ struct Compiler
                     expr = g->expr;
                 else if (AstExprTypeAssertion* t = expr->as<AstExprTypeAssertion>())
                 {
-                    if (isTableTyped(t->annotation))
+                    if (isDeclaredNonObject(t))
                         return true;
 
                     expr = t->expr;
@@ -1563,21 +1661,172 @@ struct Compiler
             if (expr->is<AstExprTable>() || expr->is<AstExprConstantString>() || expr->is<AstExprConstantNumber>())
                 return true;
 
-            if (AstExprIndexName* idx = expr->as<AstExprIndexName>())
-                return isProvenSelf(idx->expr) && isTableTyped(self->findClassFieldType(cls, idx->index));
+            // a folded constant, an interpolated string, and a comparison or `not`, which always yield a boolean
+            if (self->isConstant(expr) || expr->is<AstExprInterpString>())
+                return true;
+
+            if (AstExprUnary* unary = expr->as<AstExprUnary>(); unary && unary->op == AstExprUnary::Op::Not)
+                return true;
+
+            if (AstExprBinary* binary = expr->as<AstExprBinary>(); binary && isComparison(binary->op))
+                return true;
+
+            if (isDeclaredNonObject(expr))
+                return true;
 
             if (AstExprLocal* le = expr->as<AstExprLocal>())
             {
-                if (isTableTyped(le->local->annotation))
-                    return true;
-
                 Variable* v = self->variables.find(le->local);
+                bool followsInit = depth < 4 && v && !v->written && v->init && v->init != expr;
 
-                if (depth < 4 && v && !v->written && v->init && v->init != expr)
+                if (followsInit)
                     return isKnownNonObject(v->init, depth + 1);
             }
 
             return false;
+        }
+
+        bool isPodClass(AstStatClass* decl)
+        {
+            return !decl->primaryConstructor && !self->findClassInit(decl);
+        }
+
+        // Is `call` certainly not a POD construction, reached directly or through a C function such as `pcall`?
+        // A builtin, a Lua function the compiler can see, a known method, and a class with its own `__init` all run
+        // something other than a POD constructor on the arguments.
+        bool callsKnownNonPodTarget(AstExprCall* call)
+        {
+            if (call->self)
+                return callsKnownMethod(call);
+
+            if (const int* bfid = self->builtins.find(call); bfid && *bfid != LBF_NONE)
+                return true;
+
+            if (AstStatClass* constructed = self->classBindingOf(call->func))
+                return !isPodClass(constructed);
+
+            return self->getFunctionExpr(call->func) != nullptr;
+        }
+
+        bool visit(AstExprCall* node) override
+        {
+            // a class named directly as the callee is covered here, by the call's arguments
+            if (!node->self && self->classBindingOf(node->func))
+                podCallees.insert(node->func);
+
+            if (callsKnownNonPodTarget(node))
+                return true;
+
+            if (node->self)
+            {
+                if (AstExprIndexName* idx = node->func->as<AstExprIndexName>(); idx && !isKnownNonObject(idx->expr))
+                    mayConstructPod = true;
+            }
+
+            for (AstExpr* arg : node->args)
+                if (!isKnownNonObject(arg))
+                    mayConstructPod = true;
+
+            return true;
+        }
+
+        // a POD class used as a value can be constructed from anywhere, e.g. `pcall(Pod, obj)`
+        bool visit(AstExprGlobal* node) override
+        {
+            AstStatClass* decl = self->classBindingOf(node);
+            bool podAsValue = decl && isPodClass(decl) && !podCallees.contains(node);
+
+            if (podAsValue)
+                mayConstructPod = true;
+
+            return false;
+        }
+    };
+
+    // Luwu Classes (rfcs/classes.md): whether `method` of `cls`, inlined into code outside `cls`, behaves exactly as the
+    // call would as far as `accessClass`'s private members go. Private access is authorized at runtime against the
+    // *running* closure, which for inlined code is the caller's. So with `accessClass` = cls, an access in the body
+    // that stays runtime-checked and could reach one of cls's private members would wrongly raise; and with
+    // `accessClass` = the caller's class, one that could reach the caller's private members would wrongly succeed.
+    // The body may touch private members only through its own proven `self` (compiled to a constant offset, no
+    // runtime check; see inlineProvenSelfClass). Refuses:
+    //  - a name private to accessClass on anything else, a private method or static (even on `self`), and a write to
+    //    a `const` field (which stays runtime-checked);
+    //  - constructing accessClass through a private constructor (NEWOBJECT's check sees the caller);
+    //  - a possible POD construction of a possible object (PodConstructionVisitor);
+    //  - indexing with a runtime key (`x[k]`) unless `x` is known not to be an object: `k` could name a private
+    //    member. With `accessClass` = cls, "known" trusts declared table types (`inner: { T }`), so a declaration
+    //    that lies can still make the inlined body raise where the call wouldn't -- never the reverse, which is why
+    //    declarations are not trusted when checking the caller's class;
+    //  - nested functions (tryCompileInlinedCall refuses those across classes anyway).
+    struct InlinedPrivateAccessVisitor : PodConstructionVisitor
+    {
+        using PodConstructionVisitor::visit;
+
+        AstStatClass* cls;
+        AstStatClass* accessClass;
+        AstLocal* selfLocal;
+        bool keeps = true;
+        DenseHashSet<AstExpr*> writeTargets{nullptr};
+
+        InlinedPrivateAccessVisitor(Compiler* self, AstStatClass* cls, AstStatClass* accessClass, AstExprFunction* method)
+            : PodConstructionVisitor(self)
+            , cls(cls)
+            , accessClass(accessClass)
+            , selfLocal(method->args.size > 0 && self->classMethodSelfChecks.contains(method) ? method->args.data[0] : nullptr)
+        {
+        }
+
+        bool isProvenSelf(AstExpr* expr)
+        {
+            while (AstExprGroup* g = expr->as<AstExprGroup>())
+                expr = g->expr;
+
+            AstExprLocal* le = expr->as<AstExprLocal>();
+            return selfLocal && le && !le->upvalue && le->local == selfLocal;
+        }
+
+        void checkNamedAccess(AstExpr* object, AstName name, AstExpr* node)
+        {
+            if (!self->classMemberIsPrivate(accessClass, name))
+                return;
+
+            bool isWrite = writeTargets.contains(node);
+
+            if (isProvenSelf(object) && self->classInstanceMemberOffset(cls, name, isWrite) >= 0)
+                return;
+
+            keeps = false;
+        }
+
+        // A declared table type rules out an object, so a body that indexes it with a runtime key, or hands it to a
+        // call, still inlines. Nothing verifies that declaration, so this is annotation trust like any other: off with
+        // trust off, and never used when checking the caller's class, where a lie would gain access.
+        bool isTableTyped(AstType* ty)
+        {
+            bool mayTrust = self->trustsTypeAnnotations() && accessClass == cls;
+            return mayTrust && ty && ty->is<AstTypeTable>();
+        }
+
+        bool isDeclaredNonObject(AstExpr* expr) override
+        {
+            if (AstExprTypeAssertion* t = expr->as<AstExprTypeAssertion>())
+                return isTableTyped(t->annotation);
+
+            if (AstExprIndexName* idx = expr->as<AstExprIndexName>())
+                return isProvenSelf(idx->expr) && isTableTyped(self->findClassFieldType(cls, idx->index));
+
+            if (AstExprLocal* le = expr->as<AstExprLocal>())
+                return isTableTyped(le->local->annotation);
+
+            return false;
+        }
+
+        // `self:name()` on the proven `self` reaches the method `name`, if the class has one
+        bool callsKnownMethod(AstExprCall* call) override
+        {
+            AstExprIndexName* idx = call->func->as<AstExprIndexName>();
+            return idx && isProvenSelf(idx->expr) && self->findInstanceMethod(cls, idx->index);
         }
 
         bool isPrivatelyConstructed(AstExprCall* call)
@@ -1596,21 +1845,13 @@ struct Compiler
             else
                 return false;
 
-            return name == cls->name->name && isPrivateName(self->names.getOrAdd("__init"));
+            return name == accessClass->name->name && self->classConstructorIsPrivate(accessClass);
         }
 
-        bool visit(AstStatAssign* node) override
+        void assign(AstExpr* var) override
         {
-            for (AstExpr* var : node->vars)
-                writeTargets.insert(var);
-
-            return true;
-        }
-
-        bool visit(AstStatCompoundAssign* node) override
-        {
-            writeTargets.insert(node->var);
-            return true;
+            writeTargets.insert(var);
+            var->visit(this);
         }
 
         bool visit(AstExprIndexName* node) override
@@ -1621,18 +1862,13 @@ struct Compiler
 
         bool visit(AstExprIndexExpr* node) override
         {
-            if (AstExprConstantString* key = node->index->as<AstExprConstantString>())
-            {
-                checkNamedAccess(node->expr, self->names.getOrAdd(key->value.data, key->value.size), node);
-            }
-            else if (const Constant* key = self->constants.find(node->index); key && key->type == Constant::Type_String)
-            {
-                checkNamedAccess(node->expr, self->names.getOrAdd(key->valueString, key->stringLength), node);
-            }
+            AstName key;
+            bool constantKey = self->getConstantStringKey(node->index, key);
+
+            if (constantKey)
+                checkNamedAccess(node->expr, key, node);
             else if (!isKnownNonObject(node->expr))
-            {
                 keeps = false;
-            }
 
             return true;
         }
@@ -1642,7 +1878,7 @@ struct Compiler
             if (!node->self && isPrivatelyConstructed(node))
                 keeps = false;
 
-            return true;
+            return PodConstructionVisitor::visit(node);
         }
 
         bool visit(AstExprFunction* node) override
@@ -1652,20 +1888,23 @@ struct Compiler
         }
     };
 
-    bool classInlinedBodyKeepsPrivateAccess(AstStatClass* cls, AstExprFunction* method)
+    bool classInlinedBodyKeepsPrivateAccess(AstStatClass* cls, AstStatClass* accessClass, AstExprFunction* method)
     {
-        if (bool* cached = classInlineKeepsPrivateAccess.find(method))
+        InlineAccessKey key{method, accessClass};
+
+        if (bool* cached = classInlineKeepsPrivateAccess.find(key))
             return *cached;
 
-        InlinedPrivateAccessVisitor visitor(this, cls, method);
+        InlinedPrivateAccessVisitor visitor(this, cls, accessClass, method);
         method->body->visit(&visitor);
 
         for (AstExpr* argDefault : method->argsDefaults)
             if (argDefault)
                 argDefault->visit(&visitor);
 
-        classInlineKeepsPrivateAccess[method] = visitor.keeps;
-        return visitor.keeps;
+        bool keeps = visitor.keeps && !visitor.mayConstructPod;
+        classInlineKeepsPrivateAccess[key] = keeps;
+        return keeps;
     }
 
     // Runtime checking of `self` for methods (see rfcs/classes.md): the inline site's CHECKSELFCLASS is
@@ -1693,15 +1932,15 @@ struct Compiler
     // otherwise.
     //
     // `selfCall`: the check is emitted at an inline site for a `:` call. Only affects the error message.
-    void emitSelfClassCheck(const SelfClassCheck& selfCheck, uint8_t selfReg, uint8_t classReg, bool selfCall, const Location& location)
+    void emitSelfClassCheck(AstName methodName, uint8_t selfReg, uint8_t classReg, bool selfCall, const Location& location)
     {
-        int32_t methodName = bytecode.addConstantString(sref(selfCheck.methodName));
+        int32_t methodNameCid = bytecode.addConstantString(sref(methodName));
 
-        if (methodName < 0)
+        if (methodNameCid < 0)
             CompileError::raise(location, "Exceeded constant limit; simplify the code to compile");
 
         bytecode.emitABC(LOP_CHECKSELFCLASS, selfReg, classReg, selfCall ? 1 : 0);
-        bytecode.emitAux(methodName);
+        bytecode.emitAux(methodNameCid);
     }
 
     void compileInlinedCall(AstExprCall* expr, AstExprFunction* func, uint8_t target, uint8_t targetCount, AstExpr* selfExpr = nullptr)
@@ -1772,8 +2011,8 @@ struct Compiler
                 if (hasArgDefaults || (vv && vv->written))
                 {
                     // If the argument is mutated or this function has default values, we need to allocate a fresh register even if it's a constant.
-                    // Default values assign into parameter registers and can reference other parameters, so reusing a caller local or folding a
-                    // parameter into locstants could mutate caller state or leave default expressions unable to reference parameters.
+                    // Default values assign into parameter registers, so reusing a caller local's register would let a default overwrite it, and a
+                    // parameter folded into locstants would have no register for its default to be assigned to.
                     uint8_t reg = allocReg(arg, 1u);
                     uint32_t allocpc = bytecode.getDebugPC();
 
@@ -1845,26 +2084,20 @@ struct Compiler
 
         if (FFlag::DebugLuauUserDefinedClasses && func->args.size > 0)
         {
-            // At O2 an inlined method body can receive a `self` of a class other than the method's, which this check rejects.
-            // This can be because `self` is annotated incorrectly or in the more common case that the wrong type of `self` was passed to a free function
-            // that directly calls methods on `self`:
+            // Luwu Classes (rfcs/classes.md): an inlined method body can receive a `self` of another class, when the
+            // receiver's class came from an annotation (trusted tier, see ReceiverClass). For example, a VecDeque
+            // passed to
             //
             // const function push(list: List, first: string, last: string)
             //     list:push(first)
             //     list:push(last)
             // end
             //
-            // we'll try to inline `list:push` here but when called with a `self` of the wrong class (like a VecDeque maybe) that also has `:push`
-            // we correctly namecall to `VecDeque:push` in O0 and O1 but would incorrectly inline `List`'s implementation of `:push` in O2.
-            // I chose to error for this instead of simply jumping over the wrong instructions because it means we'd allow a lot of unused instructions
-            // that only get jumped over, and the user's code is wrong in that they called a method with the wrong type...
-            //
-            // If the user wants --!optimize 2 optimizations, they probably want to know that they have code that isn't getting those optimizations
-            // due to an incorrect callsite or annotation. We can't say that the type annotation we used to inline the method was 'wrong' or 'lying'
-            // or was an 'attempt to bypass private access' because it could've just as well been a simple mistake at a callsite that wants to use
-            // --!optimize 2 inlining (or they're using a runtime that just enabled o2 by default and didn't even know this could happen).
-            //
-            // Since Luwu is more okay with being stricter than Luau I felt this was a reasonable decision to catch incorrect code.
+            // runs `VecDeque:push` at O0/O1, but O2 inlined `List:push`. The inline site's CHECKSELFCLASS raises
+            // instead of dispatching to the right method: a fallback call would keep a dead copy of the body at
+            // every site, and the error tells the user that the annotation or call site is wrong and not getting
+            // the O2 optimization it asked for. The message does not call the annotation a lie or an attempt to
+            // bypass private access, since a mistake at one call site reads the same.
             if (const SelfClassCheck* selfCheck = classMethodSelfChecks.find(func); selfCheck && !selfIsAlreadyChecked(func, selfExpr))
             {
                 RegScope rsCheck(this);
@@ -1894,7 +2127,7 @@ struct Compiler
                 // check being emitted belongs to this call, and that's the line its error must blame
                 setDebugLine(expr);
 
-                emitSelfClassCheck(*selfCheck, selfReg, classReg, expr->self, expr->location);
+                emitSelfClassCheck(selfCheck->methodName, selfReg, classReg, expr->self, expr->location);
 
                 if (boundReg >= 0)
                     selfProvenClass = classMethodOwner.find(func);
@@ -1916,8 +2149,32 @@ struct Compiler
             inlineFrames.back().caller = currentFunction;
         }
 
+        exprChanges.clear();
+        localChanges.clear();
+
         if (FFlag::LuwuDefaultArguments)
+        {
+            // Luwu (default arguments): the defaults are compiled in this frame, where a constant local they read
+            // has no register (it was folded away) and is no upvalue either, so they are folded like the body.
+            for (AstExpr* defaultValue : func->argsDefaults)
+                if (defaultValue)
+                    foldConstants(
+                        constants,
+                        variables,
+                        locstants,
+                        builtinsFold,
+                        builtinsFoldLibraryK,
+                        options.vectorPrecision == 1,
+                        options.libraryMemberConstantCb,
+                        defaultValue,
+                        names,
+                        tableConstants,
+                        &exprChanges,
+                        &localChanges
+                    );
+
             compileFunctionArgDefaults(func);
+        }
 
         // this pass tracks which calls are builtins and can be compiled more efficiently
         analyzeBuiltins(inlineBuiltins, globals, variables, options, func->body, names);
@@ -1940,9 +2197,6 @@ struct Compiler
         }
 
         // fold constant values updated above into expressions in the function body, recording changes for undo
-        exprChanges.clear();
-        localChanges.clear();
-
         foldConstants(
             constants,
             variables,
@@ -1959,6 +2213,7 @@ struct Compiler
         );
 
         bool terminatesEarly = false;
+        std::vector<AssertProof> assertProofs;
 
         for (size_t i = 0; i < func->body->body.size; ++i)
         {
@@ -1978,7 +2233,11 @@ struct Compiler
                 }
                 break;
             }
+
+            noteAssertProof(stat, func->body->body, i, assertProofs);
         }
+
+        restoreAssertProofs(assertProofs);
 
         // for the fallthrough path we need to ensure we clear out target registers
         if (!terminatesEarly)
@@ -2021,7 +2280,9 @@ struct Compiler
     }
 
     // Resolve a type annotation naming a declared class to its declaration (no module prefix, so
-    // `Vector2` and `List<number>` resolve but `M.Vector2` doesn't).
+    // `Vector2` and `List<number>` resolve but `M.Vector2` doesn't). A name that is also declared as a type
+    // alias or generic parameter anywhere in the module (typeNamesShadowingClasses) doesn't resolve: the
+    // compiler has no type scopes, and `type Node = other.Node` inside a function names another class.
     AstStatClass* classFromType(AstType* ty)
     {
         if (!ty)
@@ -2031,7 +2292,7 @@ struct Compiler
         {
             // A generic class's type arguments are erased at runtime (`List<number>` and `List<string>`
             // share one class value and layout), so they don't change which class this names.
-            if (!ref->prefix)
+            if (!ref->prefix && !typeNamesShadowingClasses.contains(ref->name))
             {
                 if (AstStatClass** cls = classByName.find(ref->name))
                     return *cls;
@@ -2135,11 +2396,6 @@ struct Compiler
         return nullptr;
     }
 
-    // Determine the statically-known class of a method-call receiver, if any:
-    //  - an inlined method's proven `self` (inlineProvenSelfClass),
-    //  - the enclosing method's own `self` (its class is the method's owning class),
-    //  - a local/argument carrying a class type annotation (`p: Particle`),
-    //  - a typed field access `<recv>.field` whose declared field type names a class.
     // Luwu Classes (rfcs/classes.md): a receiver's class, and *how* the compiler knows it. The two tiers
     // decide one thing -- whether the inline site may skip CHECKSELFCLASS (see selfIsAlreadyChecked):
     //
@@ -2180,17 +2436,9 @@ struct Compiler
 
         if (AstExprLocal* local = recv->as<AstExprLocal>())
         {
-            // the enclosing method's own `self` is an instance of the method's owning class -- proven
-            // when the prologue's check still stands (provenSelfClass), and merely the class this method
-            // belongs to once something reassigns `self`
-            if (currentFunction && currentFunction->args.size > 0 && local->local == currentFunction->args.data[0])
-            {
-                if (AstStatClass* proven = provenSelfClass(recv))
-                    return {proven, /* proven= */ true};
-
-                if (AstStatClass** owner = classMethodOwner.find(currentFunction))
-                    return {*owner, /* proven= */ false};
-            }
+            // the enclosing method's own `self`, which its prologue checked and nothing can reassign
+            if (AstStatClass* proven = provenSelfClass(recv))
+                return {proven, /* proven= */ true};
 
             // a `class.isinstance` branch proves the receiver's exact class at runtime, so it outranks
             // whatever the local was annotated or initialized as
@@ -2222,10 +2470,10 @@ struct Compiler
     // Luwu Classes (rfcs/classes.md): resolve an `obj:method()` call to a method of the object's class so it
     // can be inlined at O2. The receiver's class must be statically known (see resolveReceiverClass).
     // Inlining into code lexically inside that class is always allowed. From anywhere else, a private
-    // method never inlines, and a method of a class with private members inlines only if its body
-    // needs no runtime private check (see classInlinedBodyKeepsPrivateAccess). compileInlinedCall
-    // re-emits the method's CHECKSELFCLASS at the inline site, so a lying annotation can't run the
-    // wrong body.
+    // method never inlines, and the body may not depend on the running closure's private access: neither
+    // on the class's (it would lose it), nor on the caller's class's (it would gain it). See
+    // classInlinedBodyKeepsPrivateAccess. A trusted receiver keeps the method's CHECKSELFCLASS at the
+    // inline site (selfIsAlreadyChecked), so a lying annotation can't run the wrong body.
     AstExprFunction* tryResolveMethodCall(AstExprCall* expr)
     {
         if (!expr->self)
@@ -2249,6 +2497,14 @@ struct Compiler
 
         AstStatClass* recvClass = receiver.cls;
 
+        // The inline site's CHECKSELFCLASS reads the class binding, which is nil before the declaration runs. A
+        // proven receiver is an instance, so the declaration has run; an annotation proves nothing.
+        if (!receiver.proven && !isClassBoundAt(recvClass, expr->location))
+        {
+            bytecode.addDebugRemark("inlining failed: %s may not be declared yet", recvClass->name->name.value);
+            return nullptr;
+        }
+
         AstExprFunction* method = findInstanceMethod(recvClass, idx->index);
         if (!method)
             return nullptr;
@@ -2256,7 +2512,8 @@ struct Compiler
         // Code lexically inside recvClass (its methods and closures nested in them) runs with recvClass's private
         // access, so the method's body behaves the same inlined there. Anywhere else, only a body whose private
         // access doesn't depend on the running closure can move (see InlinedPrivateAccessVisitor).
-        bool sameClass = lexicalClassOf(currentFunction) == recvClass;
+        AstStatClass* callerClass = lexicalClassOf(currentFunction);
+        bool sameClass = callerClass == recvClass;
 
         // Calling a private method is itself a private access, checked by NAMECALL against the running closure.
         // Inlining it from outside the class would skip that check entirely and let the call succeed.
@@ -2266,9 +2523,23 @@ struct Compiler
             return nullptr;
         }
 
-        if (!sameClass && classesWithPrivateMembers.contains(recvClass) && !classInlinedBodyKeepsPrivateAccess(recvClass, method))
+        bool bodyLosesAccess =
+            !sameClass && classesWithPrivateMembers.contains(recvClass) && !classInlinedBodyKeepsPrivateAccess(recvClass, recvClass, method);
+
+        if (bodyLosesAccess)
         {
             bytecode.addDebugRemark("inlining failed: body needs %s's private access at runtime", recvClass->name->name.value);
+            return nullptr;
+        }
+
+        // A free function inlined into a method does gain its class's private access; that is accepted (a class
+        // answers for the functions its own methods call). Another class's method is not the class's own logic.
+        bool callerHasPrivateMembers = callerClass && classesWithPrivateMembers.contains(callerClass);
+        bool bodyGainsAccess = !sameClass && callerHasPrivateMembers && !classInlinedBodyKeepsPrivateAccess(recvClass, callerClass, method);
+
+        if (bodyGainsAccess)
+        {
+            bytecode.addDebugRemark("inlining failed: body would gain %s's private access", callerClass->name->name.value);
             return nullptr;
         }
 
@@ -2344,6 +2615,10 @@ struct Compiler
             if (offset == properties.size())
                 return false;
 
+            // a repeated key's earlier value is still evaluated by the table form, and has no register here
+            if (values[offset])
+                return false;
+
             values[offset] = item.value;
         }
 
@@ -2374,11 +2649,9 @@ struct Compiler
         while (AstExprGroup* group = callee->as<AstExprGroup>())
             callee = group->expr;
 
-        AstLocal** classLocal = classLocals.find(callee->as<AstExprGlobal>()->name);
-        int classLocalReg = classLocal ? getLocalReg(*classLocal) : -1;
-        uint8_t classReg = classLocalReg >= 0 ? uint8_t(classLocalReg) : compileExprAuto(callee, rs);
+        uint8_t classReg = compileClassOperand(callee, rs);
 
-        bytecode.emitABC(LOP_NEWOBJECT, base, classReg, 2);
+        bytecode.emitABC(LOP_NEWOBJECT, base, classReg, LBC_NEWOBJECT_FIELDS);
         bytecode.emitAux(uint32_t(properties.size()));
 
         if (base != target)
@@ -2387,19 +2660,49 @@ struct Compiler
         return true;
     }
 
-    // Luwu Classes (rfcs/classes.md): can a primary constructor's field initializers be compiled at
-    // the construction site rather than inside the synthesized `__init`? Only the constructor's own
-    // parameters, globals and constants are reachable from there. Any other local would be an upvalue
-    // of `__init`, which the construction site has no way to name, and a closure could capture one
-    // without naming it at all.
-    struct PrimaryInitInlineVisitor : AstVisitor
+    // Luwu Classes (rfcs/classes.md): can a primary constructor's parameter defaults and field initializers
+    // be compiled at the construction site rather than inside the synthesized `__init`?
+    //  - Only the constructor's own parameters, globals and constants can be named from the site. Any other
+    //    local would be an upvalue of `__init`, which the site has no way to name, and a closure could
+    //    capture one without naming it at all. `...` would be the site's own.
+    //  - Private access is authorized against the running closure, which is the site's instead of
+    //    `__init`'s. The two agree when the site is lexically inside the class. Anywhere else, an initializer
+    //    may not name a member that is private to the class or to the site's class, index with a runtime key
+    //    that could name one, construct either class through a private constructor, or construct a POD class
+    //    from something that might be an object (PodConstructionVisitor).
+    struct PrimaryInitInlineVisitor : PodConstructionVisitor
     {
+        using PodConstructionVisitor::visit;
+
         const DenseHashSet<AstLocal*>& params;
+        AstStatClass* decl;
+        AstStatClass* siteClass;
+        bool checksPrivacy;
         bool inlinable = true;
 
-        explicit PrimaryInitInlineVisitor(const DenseHashSet<AstLocal*>& params)
-            : params(params)
+        PrimaryInitInlineVisitor(Compiler* self, const DenseHashSet<AstLocal*>& params, AstStatClass* decl, AstStatClass* siteClass)
+            : PodConstructionVisitor(self)
+            , params(params)
+            , decl(decl)
+            , siteClass(siteClass)
+            , checksPrivacy(siteClass != decl)
         {
+        }
+
+        bool isPrivateToEither(AstName name)
+        {
+            return self->classMemberIsPrivate(decl, name) || (siteClass && self->classMemberIsPrivate(siteClass, name));
+        }
+
+        // The initializers may be moved when they mean the same at the site. A POD construction reads private
+        // fields only of a class that has some, so it matters only when this class or the site's does.
+        bool movable() const
+        {
+            bool eitherHasPrivateMembers =
+                self->classesWithPrivateMembers.contains(decl) || (siteClass && self->classesWithPrivateMembers.contains(siteClass));
+            bool podReadChangesAccess = checksPrivacy && mayConstructPod && eitherHasPrivateMembers;
+
+            return inlinable && !podReadChangesAccess;
         }
 
         bool visit(AstExprLocal* node) override
@@ -2421,23 +2724,62 @@ struct Compiler
             inlinable = false;
             return false;
         }
+
+        bool visit(AstExprIndexName* node) override
+        {
+            if (checksPrivacy && isPrivateToEither(node->index))
+                inlinable = false;
+
+            return true;
+        }
+
+        bool visit(AstExprIndexExpr* node) override
+        {
+            if (!checksPrivacy)
+                return true;
+
+            AstName key;
+            bool constantKey = self->getConstantStringKey(node->index, key);
+
+            if (!constantKey || isPrivateToEither(key))
+                inlinable = false;
+
+            return true;
+        }
+
+        bool visit(AstExprCall* node) override
+        {
+            AstStatClass* constructed = node->self ? nullptr : self->classBindingOf(node->func);
+            bool constructsGuardedClass = constructed && (constructed == decl || constructed == siteClass);
+            bool privatelyConstructed = constructsGuardedClass && self->classConstructorIsPrivate(constructed);
+
+            if (checksPrivacy && privatelyConstructed)
+                inlinable = false;
+
+            return PodConstructionVisitor::visit(node);
+        }
     };
 
     // Luwu Classes (rfcs/classes.md): try the statically resolved fast path for the class field
     // parameter list syntax (primary constructor).
     //
-    // `ClassName(a, b)` compiles to the positional NEWOBJECT ... FIELDS form.
-    // The arguments are evaluated into registers, each field's initializer is compiled right here,
-    // and NEWOBJECT finishes the instance. When this succeeds `__init` doesn't need to be called.
+    // `ClassName(a, b)` compiles to the positional NEWOBJECT ... FIELDS form. The arguments are evaluated
+    // into registers, then the defaults of the parameters that came out nil, then each field's initializer
+    // in declaration order -- the order the synthesized `__init` evaluates them in, since a call evaluates
+    // every argument before `__init`'s prologue applies the defaults -- and NEWOBJECT finishes the instance.
+    // When this succeeds `__init` doesn't need to be called.
     //
     // Returns false without emitting anything when the initializers can't be moved to the call site.
     // tryCompileNewObject then falls back to calling `__init`.
     //
     // Reasons why this may need to fall back:
     //
-    //   - an initializer reads a local that isn't a constructor parameter, or contains a closure or
-    //     `...`; only parameters, globals and constants can be named from the call site
-    //     (PrimaryInitInlineVisitor)
+    //   - an initializer can't be compiled at the site with the same meaning (PrimaryInitInlineVisitor)
+    //   - the constructor is private and the site is outside the class, so construction raises; the
+    //     INIT form raises it before any default runs, as the call does
+    //   - the site is already expanding this class's initializers, directly or through another class's
+    //     (`class Node(depth) child = if depth > 0 then Node(depth - 1) else nil end`), or is this class's
+    //     own `__init`: the expansion would never end
     //   - the class has more than kMaxNewObjectFields fields, past which a register and a LOADNIL
     //     per field stop paying for themselves
     //   - the call passes more arguments than the constructor has parameters, since the extras would
@@ -2448,6 +2790,22 @@ struct Compiler
     {
         AstClassPrimaryConstructor* primaryConstructor = decl->primaryConstructor;
         LUAU_ASSERT(primaryConstructor);
+
+        AstExprFunction* const* primaryInitFn = classPrimaryInitFn.find(decl);
+        LUAU_ASSERT(primaryInitFn);
+
+        AstStatClass* siteClass = lexicalClassOf(currentFunction);
+
+        if (siteClass != decl && classConstructorIsPrivate(decl))
+            return false;
+
+        bool alreadyExpanding = std::find(fieldsExpansionStack.begin(), fieldsExpansionStack.end(), decl) != fieldsExpansionStack.end();
+
+        if (alreadyExpanding || currentFunction == *primaryInitFn)
+        {
+            bytecode.addDebugRemark("primary constructor inlining failed: %s constructs itself", decl->name->name.value);
+            return false;
+        }
 
         // fields in the order compileClassDeclaration emits them: the class body's properties, then
         // the parameters the body doesn't restate
@@ -2497,9 +2855,9 @@ struct Compiler
 
         auto isInlinable = [&](AstExpr* initializer)
         {
-            PrimaryInitInlineVisitor visitor{parameters};
+            PrimaryInitInlineVisitor visitor{this, parameters, decl, siteClass};
             initializer->visit(&visitor);
-            return visitor.inlinable;
+            return visitor.movable();
         };
 
         for (const AstClassProperty* prop : properties)
@@ -2513,25 +2871,22 @@ struct Compiler
         // ...and it has to be worth copying into every construction site, same knob the general
         // inliner uses. The cost of the whole `__init` body stands in for the initializers, since that
         // body is exactly the field assignments.
-        if (AstExprFunction* const* primaryInitFn = classPrimaryInitFn.find(decl))
+        int* cachedCost = classPrimaryInitCost.find(decl);
+        int cost;
+
+        if (cachedCost)
+            cost = *cachedCost;
+        else
         {
-            int* cached = classPrimaryInitCost.find(decl);
-            int cost;
+            uint64_t costModel = modelCost((*primaryInitFn)->body, (*primaryInitFn)->args.data, (*primaryInitFn)->args.size, builtins, constants);
+            cost = computeCost(costModel, nullptr, 0);
+            classPrimaryInitCost[decl] = cost;
+        }
 
-            if (cached)
-                cost = *cached;
-            else
-            {
-                uint64_t costModel = modelCost((*primaryInitFn)->body, (*primaryInitFn)->args.data, (*primaryInitFn)->args.size, builtins, constants);
-                cost = computeCost(costModel, nullptr, 0);
-                classPrimaryInitCost[decl] = cost;
-            }
-
-            if (cost > FInt::LuauCompileInlineThreshold)
-            {
-                bytecode.addDebugRemark("primary constructor inlining failed: too expensive (cost %d)", cost);
-                return false;
-            }
+        if (cost > FInt::LuauCompileInlineThreshold)
+        {
+            bytecode.addDebugRemark("primary constructor inlining failed: too expensive (cost %d)", cost);
+            return false;
         }
 
         AstExpr* callee = expr->func;
@@ -2602,16 +2957,21 @@ struct Compiler
                 parameterRegs[i] = allocReg(expr, 1u);
         }
 
+        for (size_t i = 0; i < expr->args.size; ++i)
+            compileExprTemp(expr->args.data[i], uint8_t(parameterRegs[i]));
+
+        // everything past this point is `__init`'s work, which a call would never start on a nil class
+        uint8_t classReg = compileClassOperand(callee, rs);
+
+        FieldsExpansion expansion(this, decl);
+
         for (size_t i = 0; i < primaryConstructor->args.size; ++i)
         {
-            AstExpr* arg = i < expr->args.size ? expr->args.data[i] : nullptr;
             AstExpr* paramDefault = primaryConstructor->argsDefaults.data[i];
             uint8_t reg = uint8_t(parameterRegs[i]);
 
-            if (arg)
+            if (i < expr->args.size)
             {
-                compileExprTemp(arg, reg);
-
                 // an argument that turns out to be nil still takes the parameter's default, exactly as
                 // the synthesized `__init`'s prologue would (see compileFunctionArgDefaults)
                 if (paramDefault)
@@ -2690,13 +3050,9 @@ struct Compiler
 
         popLocals(oldLocals);
 
-        AstLocal** classLocal = classLocals.find(callee->as<AstExprGlobal>()->name);
-        int classLocalReg = classLocal ? getLocalReg(*classLocal) : -1;
-        uint8_t classReg = classLocalReg >= 0 ? uint8_t(classLocalReg) : compileExprAuto(callee, rs);
-
         setDebugLine(expr);
 
-        bytecode.emitABC(LOP_NEWOBJECT, base, classReg, 2);
+        bytecode.emitABC(LOP_NEWOBJECT, base, classReg, LBC_NEWOBJECT_FIELDS);
         bytecode.emitAux(uint32_t(fieldCount));
 
         if (base != target)
@@ -2705,9 +3061,57 @@ struct Compiler
         return true;
     }
 
+    // Luwu Classes (rfcs/classes.md): marks a class's initializers as being expanded at a construction site
+    // (tryCompileNewObjectFieldParameters) for as long as it lives.
+    struct FieldsExpansion
+    {
+        Compiler* self;
+
+        FieldsExpansion(Compiler* self, AstStatClass* decl)
+            : self(self)
+        {
+            self->fieldsExpansionStack.push_back(decl);
+        }
+
+        ~FieldsExpansion()
+        {
+            self->fieldsExpansionStack.pop_back();
+        }
+    };
+
+    // Luwu Classes (rfcs/classes.md): the register holding the class a construction's callee names, for
+    // NEWOBJECT's class operand. NEWOBJECT takes that operand on trust, so where the binding may still be
+    // nil (isClassBoundAt) this also emits the check that raises what calling it would: an ordinary CALL of
+    // the nil value. The callers compile it after the arguments, which a call evaluates before it raises.
+    uint8_t compileClassOperand(AstExpr* callee, RegScope& rs)
+    {
+        AstLocal** classLocal = classLocals.find(callee->as<AstExprGlobal>()->name);
+        int classLocalReg = classLocal ? getLocalReg(*classLocal) : -1;
+
+        // the class normally already lives in a register, so NEWOBJECT can read it in place
+        uint8_t classReg = classLocalReg >= 0 ? uint8_t(classLocalReg) : compileExprAuto(callee, rs);
+
+        if (!isClassBoundAt(callee))
+        {
+            size_t jumpLabel = bytecode.emitLabel();
+            bytecode.emitAD(LOP_JUMPXEQKNIL, classReg, 0);
+            bytecode.emitAux(0 | 0x80000000);
+
+            RegScope rsCall(this);
+            uint8_t callReg = allocReg(callee, 1u);
+            bytecode.emitABC(LOP_MOVE, callReg, classReg, 0);
+            bytecode.emitABC(LOP_CALL, callReg, 1, 1);
+
+            patchJump(callee, jumpLabel, bytecode.emitLabel());
+        }
+
+        return classReg;
+    }
+
     // Luwu Classes (rfcs/classes.md): try to compile `ClassName(...)` into a NEWOBJECT. Only a class
     // declared in this module can be resolved statically at all (isKnownClassExpr), and only those
-    // reach here. The opcode allocates the instance itself, skipping the class's `__call` metamethod
+    // reach here; where its binding may still be nil, compileClassOperand checks it before NEWOBJECT
+    // runs. The opcode allocates the instance itself, skipping the class's `__call` metamethod
     // and the luaR_createobject C frame a generic CALL goes through.
     //
     // This picks which of NEWOBJECT's three forms fits, and emits the last two itself:
@@ -2778,9 +3182,6 @@ struct Compiler
 
         RegScope rs(this);
 
-        AstLocal** classLocal = classLocals.find(global->name);
-        int classLocalReg = classLocal ? getLocalReg(*classLocal) : -1;
-
         if (!hasCustomInit)
         {
             // `ClassName { field = value }` whose keys all name declared fields doesn't need the table
@@ -2807,10 +3208,9 @@ struct Compiler
                 compileExprTemp(expr->args.data[0], uint8_t(base + 1));
             }
 
-            // the class already lives in a register, so NEWOBJECT can normally read it in place
-            uint8_t classReg = classLocalReg >= 0 ? uint8_t(classLocalReg) : compileExprAuto(callee, rs);
+            uint8_t classReg = compileClassOperand(callee, rs);
 
-            bytecode.emitABC(LOP_NEWOBJECT, base, classReg, 0);
+            bytecode.emitABC(LOP_NEWOBJECT, base, classReg, LBC_NEWOBJECT_DEFAULT);
             bytecode.emitAux(uint32_t(expr->args.size));
 
             if (base != target)
@@ -2826,9 +3226,9 @@ struct Compiler
         for (size_t i = 0; i < expr->args.size; ++i)
             compileExprTemp(expr->args.data[i], uint8_t(base + 3 + i));
 
-        uint8_t classReg = classLocalReg >= 0 ? uint8_t(classLocalReg) : compileExprAuto(callee, rs);
+        uint8_t classReg = compileClassOperand(callee, rs);
 
-        bytecode.emitABC(LOP_NEWOBJECT, base, classReg, 1);
+        bytecode.emitABC(LOP_NEWOBJECT, base, classReg, LBC_NEWOBJECT_INIT);
         bytecode.emitAux(uint32_t(expr->args.size));
 
         // `__init` takes no results; the instance is already in base
@@ -3237,6 +3637,9 @@ struct Compiler
         //  end
         //
         // ... properties and methods need to share a namespace.
+        //
+        // Luwu Classes (rfcs/classes.md): upstream still has this TODO; Luwu's parser reports a member that
+        // reuses another member's name, so it cannot reach the compiler.
 
         AstLocal** classLocal = classLocals.find(decl->name->name);
         LUAU_ASSERT(classLocal);
@@ -3554,51 +3957,92 @@ struct Compiler
         return cv ? *cv : Constant{Constant::Type_Unknown};
     }
 
-    // Luwu Classes (rfcs/classes.md): true when `node` evaluates to a class declared in this module,
-    // which callers rely on to emit opcodes that take a class operand (JUMPXISA).
+    // Luwu Classes (rfcs/classes.md): true when `node` reads the binding of a class declared in this module.
     //
     // A class name is never lexically scoped -- the parser leaves references to it as globals, and
     // compileExprGlobal redirects each one to the class's own register or upvalue rather than reading
     // the global table. Together with the parser rejecting both assignment to a class name and a
-    // second class of the same name, a global naming a declared class always evaluates to that class.
+    // second class of the same name, a global naming a declared class always reads that class's binding.
+    // The binding is nil until the declaration runs; isClassBoundAt says whether it can still be nil.
     bool isKnownClassExpr(AstExpr* node)
+    {
+        return classBindingOf(node) != nullptr;
+    }
+
+    // The class a known class expression names (see isKnownClassExpr), or null.
+    AstStatClass* classBindingOf(AstExpr* node)
     {
         while (AstExprGroup* group = node->as<AstExprGroup>())
             node = group->expr;
 
-        if (AstExprGlobal* global = node->as<AstExprGlobal>())
-            return classLocals.contains(global->name);
+        AstExprGlobal* global = node->as<AstExprGlobal>();
 
-        return false;
+        if (!global || !classLocals.contains(global->name))
+            return nullptr;
+
+        AstStatClass** decl = classByName.find(global->name);
+        return decl ? *decl : nullptr;
     }
 
-    // Luwu Classes (rfcs/classes.md): compile `class.isinstance(x, C)` used as a condition into a
-    // single fused JUMPXISA test-and-branch. When C is a class declared in this module the class operand
-    // is guaranteed; otherwise (an imported class, a class stored in a table) the instruction carries
-    // LBC_JUMPXISA_CHECKCLASS and checks it at runtime, raising the builtin's own error for a non-class.
-    // Returns false (so the caller falls back to the ordinary builtin path) when the call isn't the
-    // builtin. `onlyTruth` selects the branch polarity, matching the generic JUMPIF/JUMPIFNOT emitted by
-    // compileConditionValue below.
+    // Luwu Classes (rfcs/classes.md): does the class expression `node` certainly hold its class when it is
+    // evaluated? A class binding holds nil until its declaration statement runs (classes hoist, see
+    // preallocateHoistedClasses), and classes are only declared at the top level of the module. So code at
+    // or after the declaration's start runs after it: a later top-level statement, a function created by
+    // one, or one of the class's own members, which the declaration creates after assigning the binding.
+    // Code before it -- an earlier function, an earlier class's methods -- may run first and see nil.
+    //
+    // Inlining keeps this sound: a function can only be inlined through a local binding, which is visible
+    // only after its declaration, so a body after the class is only ever inlined into code after it. A
+    // method is inlined into code holding one of its class's instances, except through an annotation,
+    // which tryResolveMethodCall checks.
+    bool isClassBoundAt(AstExpr* node)
+    {
+        AstStatClass* decl = classBindingOf(node);
+        return decl && isClassBoundAt(decl, node->location);
+    }
+
+    bool isClassBoundAt(AstStatClass* decl, const Location& use)
+    {
+        return !(use.begin < decl->location.begin);
+    }
+
     // Luwu Classes (rfcs/classes.md): `assert(class.isinstance(x, C))` as a statement says the same thing
-    // `if class.isinstance(x, C) then` does -- and, since this is how code opts into the proven receiver
-    // tier (matchAssertIsinstanceProof), it sits in hot paths. Without this it costs two builtin call
-    // sequences where the `if` costs one fused JUMPXISA.
+    // `if class.isinstance(x, C) then` does, and since it is how code opts into the proven receiver tier
+    // (matchAssertIsinstanceProof), it sits in hot paths. It compiles to the `if` form's single JUMPXISA,
+    // which jumps over the assert when the value *is* an instance and otherwise falls into the ordinary
+    // call the caller emits next. That call runs exactly as written, so a failure keeps `assert`'s own
+    // message, a custom second argument, and the line it blames.
     //
-    // So: jump over the assert when the value *is* an instance, and otherwise fall into the ordinary call
-    // the caller emits next. The check is repeated there, which costs nothing that matters -- that path
-    // raises -- and keeps the failure behaviour exactly as written, including `assert`'s own message, a
-    // custom second argument, and the line it blames.
+    // The proof must not depend on `assert` raising: an unsafe environment can replace it with a function
+    // that returns. compileAssertIsinstanceRecheck therefore follows the call with a check that raises.
     //
-    // Returns true when the jump was emitted, leaving its label in `skipJump` for the caller to patch to
-    // the instruction after the call.
-    bool tryCompileStatAssertIsinstance(AstExprCall* call, std::vector<size_t>& skipJump)
+    // The operands are evaluated again on the failing path, so this only fuses ones that can be read again
+    // with no consequence, which is the shape the idiom has anyway (the proof needs a local, and a class
+    // binding is a local or an upvalue). The remaining arguments are skipped on the passing path, so they
+    // must have no side effects either.
+    //
+    // Returns the fused `class.isinstance` call, leaving the jump's label in `skipJump` for the caller to
+    // patch to the instruction after the call, or null when nothing was emitted.
+    AstExprCall* tryCompileStatAssertIsinstance(AstExprCall* call, std::vector<size_t>& skipJump)
+    {
+        AstExprCall* isinstance = fusableAssertIsinstance(call);
+
+        if (!isinstance || !tryCompileConditionIsinstance(isinstance, /* target= */ nullptr, skipJump, /* onlyTruth= */ true))
+            return nullptr;
+
+        return isinstance;
+    }
+
+    // The `class.isinstance` call of an `assert(class.isinstance(...))` statement that tryCompileStatAssertIsinstance
+    // may fuse, or null. Only a fused assert is followed by the recheck that makes it a proof.
+    AstExprCall* fusableAssertIsinstance(AstExprCall* call)
     {
         if (!FFlag::DebugLuauUserDefinedClasses)
-            return false;
+            return nullptr;
 
         const int* bfid = builtins.find(call);
         if (!bfid || *bfid != LBF_ASSERT || call->args.size == 0)
-            return false;
+            return nullptr;
 
         AstExpr* condition = call->args.data[0];
         while (AstExprGroup* group = condition->as<AstExprGroup>())
@@ -3606,27 +4050,53 @@ struct Compiler
 
         AstExprCall* isinstance = condition->as<AstExprCall>();
         if (!isinstance || isinstance->args.size != 2)
-            return false;
+            return nullptr;
 
-        // Both arguments are evaluated twice when the check fails -- once here, once in the call that
-        // raises -- so this only fuses ones that can be read again with no consequence. That is the shape
-        // the idiom has anyway: the proof needs a local (matchIsinstanceCall), and the class operand is a
-        // class binding, which is a local or an upvalue rather than an environment lookup.
         auto isRereadable = [&](AstExpr* arg)
         {
             while (AstExprGroup* group = arg->as<AstExprGroup>())
                 arg = group->expr;
 
-            return arg->is<AstExprLocal>() || arg->is<AstExprConstantNil>() || arg->is<AstExprConstantBool>() ||
-                   arg->is<AstExprConstantNumber>() || arg->is<AstExprConstantString>() || isKnownClassExpr(arg);
+            return arg->is<AstExprLocal>() || isConstant(arg) || isKnownClassExpr(arg);
         };
 
         if (!isRereadable(isinstance->args.data[0]) || !isRereadable(isinstance->args.data[1]))
-            return false;
+            return nullptr;
 
-        return tryCompileConditionIsinstance(isinstance, /* target= */ nullptr, skipJump, /* onlyTruth= */ true);
+        for (size_t i = 1; i < call->args.size; ++i)
+            if (!isRereadable(call->args.data[i]))
+                return nullptr;
+
+        return isinstance;
     }
 
+    // Luwu Classes (rfcs/classes.md): the failing path of a fused assert (tryCompileStatAssertIsinstance),
+    // emitted after the assert call. It is only reached when that call returned, and raises unless the
+    // value is an instance after all, so nothing after the assert runs on a failed check.
+    void compileAssertIsinstanceRecheck(AstExprCall* isinstance, std::vector<size_t>& skipJump)
+    {
+        RegScope rs(this);
+        uint8_t valueReg = compileExprAuto(isinstance->args.data[0], rs);
+        uint8_t classReg = compileExprAuto(isinstance->args.data[1], rs);
+
+        // the class operand is a class past this jump: known, or checked by it
+        size_t jumpLabel = bytecode.emitLabel();
+        bytecode.emitAD(LOP_JUMPXISA, valueReg, 0);
+        bytecode.emitAux(uint32_t(classReg) | LBC_JUMPXISA_JUMPIFINSTANCE | (isClassBoundAt(isinstance->args.data[1]) ? 0u : LBC_JUMPXISA_CHECKCLASS));
+        skipJump.push_back(jumpLabel);
+
+        // the value is not an instance, so this always raises
+        emitSelfClassCheck(names.getOrAdd("assert"), valueReg, classReg, /* selfCall= */ false, isinstance->location);
+    }
+
+    // Luwu Classes (rfcs/classes.md): compile `class.isinstance(x, C)` used as a condition into a
+    // single fused JUMPXISA test-and-branch. When C is a class declared in this module and certainly bound
+    // here (isClassBoundAt) the class operand is guaranteed; otherwise (an imported class, a class stored in
+    // a table, a class used before its declaration ran) the instruction carries LBC_JUMPXISA_CHECKCLASS and
+    // checks it at runtime, raising the builtin's own error for a non-class.
+    // Returns false (so the caller falls back to the ordinary builtin path) when the call isn't the
+    // builtin. `onlyTruth` selects the branch polarity, matching the generic JUMPIF/JUMPIFNOT emitted by
+    // compileConditionValue below.
     bool tryCompileConditionIsinstance(AstExprCall* call, const uint8_t* target, std::vector<size_t>& skipJump, bool onlyTruth)
     {
         if (!FFlag::DebugLuauUserDefinedClasses)
@@ -3636,7 +4106,7 @@ struct Compiler
         if (!bfid || *bfid != LBF_CLASS_ISINSTANCE || call->args.size != 2)
             return false;
 
-        bool classIsKnown = isKnownClassExpr(call->args.data[1]);
+        bool classIsKnown = isClassBoundAt(call->args.data[1]);
 
         // when the boolean value is also needed, initialize target to the fallthrough result (same as
         // the comparison path); the jump below fires when the result is the opposite of the fallthrough
@@ -3649,21 +4119,18 @@ struct Compiler
 
         size_t jumpLabel = bytecode.emitLabel();
         bytecode.emitAD(LOP_JUMPXISA, valueReg, 0);
-        // aux: class register in the low byte, bit 31 set means "jump if IS an instance"
-        bytecode.emitAux(uint32_t(classReg) | (onlyTruth ? 0x80000000u : 0u) | (classIsKnown ? 0u : LBC_JUMPXISA_CHECKCLASS));
+        // aux: class register in the low byte, then the flags
+        bytecode.emitAux(uint32_t(classReg) | (onlyTruth ? LBC_JUMPXISA_JUMPIFINSTANCE : 0u) | (classIsKnown ? 0u : LBC_JUMPXISA_CHECKCLASS));
 
         skipJump.push_back(jumpLabel);
         return true;
     }
 
-    // Luwu Classes (rfcs/classes.md): if `condition` is exactly `class.isinstance(x, C)` in the form
-    // tryCompileConditionIsinstance fuses into JUMPXISA -- `x` a local of this function that is never
-    // reassigned, `C` a class declared in this module -- returns C's declaration and sets `local` to `x`.
-    // Luwu Classes (rfcs/classes.md): does `region` contain an assignment to `local`? Used to bound a
-    // `class.isinstance` proof to a region no same-frame write can cross (see matchIsinstanceProvenLocal).
-    // Assignments from a nested function are *not* this question's business -- they can run whenever that
-    // function is called, so they are ruled out separately by Variable::writtenByNestedFunction.
-    struct LocalWriteVisitor : AstVisitor
+    // Luwu Classes (rfcs/classes.md): does `region` write `local`, as AssignmentVisitor defines a write?
+    // Used to bound a `class.isinstance` proof to a region no same-frame write can cross (see
+    // matchIsinstanceProvenLocal). Writes from a nested function can run whenever that function is called,
+    // so they are ruled out separately by Variable::writtenByNestedFunction.
+    struct LocalWriteVisitor : AssignmentVisitor
     {
         AstLocal* local;
         bool found = false;
@@ -3673,25 +4140,12 @@ struct Compiler
         {
         }
 
-        void note(AstExpr* var)
+        void assign(AstExpr* var) override
         {
-            if (AstExprLocal* le = var->as<AstExprLocal>(); le && le->local == local)
-                found = true;
-        }
-
-        bool visit(AstStatAssign* node) override
-        {
-            for (AstExpr* var : node->vars)
-                note(var);
-
-            return !found;
-        }
-
-        bool visit(AstStatCompoundAssign* node) override
-        {
-            note(node->var);
-
-            return !found;
+            if (AstExprLocal* le = var->as<AstExprLocal>())
+                found |= le->local == local;
+            else
+                var->visit(this);
         }
     };
 
@@ -3768,7 +4222,7 @@ struct Compiler
             value = group->expr;
 
         AstExprLocal* le = value->as<AstExprLocal>();
-        if (!le || le->upvalue || le->local->functionDepth != currentFunction->functionDepth)
+        if (!isFrameLocal(le))
             return nullptr;
 
         // A write from a function nested inside this one runs whenever that closure is called, so no
@@ -3811,11 +4265,11 @@ struct Compiler
     }
 
     // Luwu Classes (rfcs/classes.md): `assert(class.isinstance(c, C))` as a statement proves `c` for the
-    // rest of the block, exactly as an `if class.isinstance(c, C) then` branch proves it for its body --
-    // `assert` raises on a falsy condition, so every path that reaches the following statements passed the
-    // same runtime check that JUMPXISA performs. An optional message argument is fine; it does not change
-    // when assert raises. The region is therefore the statements after this one, and a write in any of
-    // them (`bodyWritesLocal`) refuses the proof the same way a write inside a then-body does.
+    // rest of the block, exactly as an `if class.isinstance(c, C) then` branch proves it for its body. Only a
+    // fused assert proves anything: its JUMPXISA passes the check, and its failing path raises after the
+    // assert call even when the environment's `assert` returns (compileAssertIsinstanceRecheck). The region is
+    // the statements after this one, and a write in any of them (`bodyWritesLocal`) refuses the proof the same
+    // way a write inside a then-body does.
     AstStatClass* matchAssertIsinstanceProof(AstStat* stat, const AstArray<AstStat*>& body, size_t index, AstLocal*& local)
     {
         if (!FFlag::DebugLuauUserDefinedClasses)
@@ -3829,8 +4283,8 @@ struct Compiler
         if (!call || call->args.size == 0)
             return nullptr;
 
-        const int* bfid = builtins.find(call);
-        if (!bfid || *bfid != LBF_ASSERT)
+        // an assert that isn't fused has no recheck after its call, so an `assert` that returns would enter the region
+        if (!fusableAssertIsinstance(call))
             return nullptr;
 
         AstStatClass* decl = matchIsinstanceCall(call->args.data[0], local);
@@ -5743,10 +6197,12 @@ struct Compiler
 
         bool continueValidated = false;
         size_t conditionLocals = 0;
+        std::vector<AssertProof> assertProofs;
 
         for (size_t i = 0; i < body->body.size; ++i)
         {
             compileStat(body->body.data[i]);
+            noteAssertProof(body->body.data[i], body->body, i, assertProofs);
 
             // continue statement inside the repeat..until loop should not close upvalues defined directly in the loop body
             // (but it must still close upvalues defined in more nested blocks)
@@ -5763,6 +6219,9 @@ struct Compiler
                 conditionLocals = localStack.size();
             }
         }
+
+        // a `continue` before an assert reaches the condition without passing it
+        restoreAssertProofs(assertProofs);
 
         // if continue was used, some locals might not have had their initialization completed
         // the lifetime of these locals has to end before the condition is executed
@@ -6639,14 +7098,17 @@ struct Compiler
                 uint8_t target = uint8_t(regTop);
 
                 // Luwu Classes (rfcs/classes.md): `assert(class.isinstance(x, C))` is a class check, and
-                // compiles to one, rather than to two builtin calls -- see compileStatAssertIsinstance.
+                // compiles to one, rather than to two builtin calls -- see tryCompileStatAssertIsinstance.
                 std::vector<size_t> assertSkip;
-                bool fusedAssert = tryCompileStatAssertIsinstance(expr, assertSkip);
+                AstExprCall* fusedIsinstance = tryCompileStatAssertIsinstance(expr, assertSkip);
 
                 compileExprCall(expr, target, /* targetCount= */ 0);
 
-                if (fusedAssert)
+                if (fusedIsinstance)
+                {
+                    compileAssertIsinstanceRecheck(fusedIsinstance, assertSkip);
                     patchJumps(stat, assertSkip, bytecode.emitLabel());
+                }
             }
             else
             {
@@ -7027,6 +7489,12 @@ struct Compiler
 
         bool visit(AstExprFunction* node) override
         {
+            // Luwu (default arguments): a function expression in a default is compiled into this function's
+            // prologue, so it has to be added first too
+            for (AstExpr* argDefault : node->argsDefaults)
+                if (argDefault)
+                    argDefault->visit(this);
+
             node->body->visit(this);
 
             for (AstLocal* arg : node->args)
@@ -7044,6 +7512,29 @@ struct Compiler
 
         bool visit(AstStatTypeFunction* node) override
         {
+            return false;
+        }
+
+        // Luwu Classes (rfcs/classes.md): an explicit `__init` compiles every field default into its
+        // prologue (classInitFieldDefaults), so a function expression in a default is used by `__init`
+        // and has to be added before it: defaults go first, then the methods in declaration order.
+        bool visit(AstStatClass* node) override
+        {
+            if (node->primaryConstructor)
+            {
+                for (AstExpr* argDefault : node->primaryConstructor->argsDefaults)
+                    if (argDefault)
+                        argDefault->visit(this);
+            }
+
+            for (const AstClassMember& member : node->members)
+                if (const AstClassProperty* prop = member.get_if<AstClassProperty>(); prop && prop->defaultValue)
+                    prop->defaultValue->visit(this);
+
+            for (const AstClassMember& member : node->members)
+                if (const AstClassMethod* method = member.get_if<AstClassMethod>())
+                    method->function->visit(this);
+
             return false;
         }
     };
@@ -7091,6 +7582,56 @@ struct Compiler
             if (current)
                 owners[node] = current;
 
+            return true;
+        }
+    };
+
+    // Luwu Classes (rfcs/classes.md): collects every type name a scope can declare -- type aliases, type
+    // functions and generic parameters -- for classFromType, which has no scopes and must not resolve a
+    // name one of these may shadow.
+    struct ShadowingTypeNameVisitor : AstVisitor
+    {
+        DenseHashSet<AstName>& typeNames;
+
+        explicit ShadowingTypeNameVisitor(DenseHashSet<AstName>& typeNames)
+            : typeNames(typeNames)
+        {
+        }
+
+        void addGenerics(const AstArray<AstGenericType*>& generics)
+        {
+            for (AstGenericType* generic : generics)
+                typeNames.insert(generic->name);
+        }
+
+        bool visit(AstStatTypeAlias* node) override
+        {
+            typeNames.insert(node->name);
+            addGenerics(node->generics);
+            return true;
+        }
+
+        bool visit(AstStatTypeFunction* node) override
+        {
+            typeNames.insert(node->name);
+            return true;
+        }
+
+        bool visit(AstStatClass* node) override
+        {
+            addGenerics(node->generics);
+            return true;
+        }
+
+        bool visit(AstExprFunction* node) override
+        {
+            addGenerics(node->generics);
+            return true;
+        }
+
+        bool visit(AstTypeFunction* node) override
+        {
+            addGenerics(node->generics);
             return true;
         }
     };
@@ -7234,7 +7775,7 @@ struct Compiler
             size_t functionDepth = node->name->functionDepth + 1;
 
             AstLocal* self = allocator.alloc<AstLocal>(
-                names.getOrAdd("self"), loc, /* shadow= */ nullptr, functionDepth, /* loopDepth= */ 0, /* annotation= */ nullptr
+                names.getOrAdd("self"), loc, /* shadow= */ nullptr, functionDepth, /* loopDepth= */ 0, /* annotation= */ nullptr, /* isConst= */ true
             );
 
             std::vector<AstStat*> body;
@@ -7702,14 +8243,36 @@ struct Compiler
     // The class whose `Proto::ownerclass` stamp each function gets at runtime: every function lexically inside a
     // class (methods, statics, synthesized `__init`/`__defaults`, and anything nested in them; innermost class wins).
     DenseHashMap<AstExprFunction*, AstStatClass*> classLexicalOwner{nullptr};
-    // tryResolveMethodCall's cache of classInlinedBodyKeepsPrivateAccess, per method
-    DenseHashMap<AstExprFunction*, bool> classInlineKeepsPrivateAccess{nullptr};
+    // tryResolveMethodCall's cache of classInlinedBodyKeepsPrivateAccess, per method and class whose private
+    // members it was checked against
+    struct InlineAccessKey
+    {
+        AstExprFunction* method;
+        AstStatClass* accessClass;
+
+        bool operator==(const InlineAccessKey& other) const
+        {
+            return method == other.method && accessClass == other.accessClass;
+        }
+    };
+
+    struct InlineAccessKeyHash
+    {
+        size_t operator()(const InlineAccessKey& key) const
+        {
+            return std::hash<AstExprFunction*>()(key.method) ^ (std::hash<AstStatClass*>()(key.accessClass) * 31);
+        }
+    };
+
+    DenseHashMap<InlineAccessKey, bool, InlineAccessKeyHash> classInlineKeepsPrivateAccess{InlineAccessKey{nullptr, nullptr}};
     // functions whose body (or default arguments) contains a function expression, per function
     DenseHashMap<AstExprFunction*, bool> functionHasNestedFunctions{nullptr};
     // Populated by ClassInitDefaultsVisitor: class name -> declaration, so a type annotation naming a
     // class (`p: Particle`, a field `velocity: Vector2`) can be resolved to its AstStatClass for
-    // typed-receiver method inlining (Stage 2, see tryResolveMethodCall).
+    // typed-receiver method inlining (see tryResolveMethodCall).
     DenseHashMap<AstName, AstStatClass*> classByName{AstName{}};
+    // Populated by ShadowingTypeNameVisitor when annotations are trusted; see classFromType.
+    DenseHashSet<AstName> typeNamesShadowingClasses{AstName{}};
     // Luwu Classes (rfcs/classes.md): locals proven to be exact instances of a class by the enclosing
     // `class.isinstance` branch being compiled (see compileStatIf / provenIsinstanceClass)
     DenseHashMap<AstLocal*, AstStatClass*> isinstanceProvenLocals{nullptr};
@@ -7767,6 +8330,9 @@ struct Compiler
     std::vector<LoopJump> loopJumps;
     std::vector<Loop> loops;
     std::vector<InlineFrame> inlineFrames;
+    // Luwu Classes (rfcs/classes.md): classes whose initializers are being compiled at a construction site
+    // (tryCompileNewObjectFieldParameters), innermost last
+    std::vector<AstStatClass*> fieldsExpansionStack;
     std::vector<Capture> captures;
     std::vector<AstLocal*> exportedLocals;
     DenseHashMap<AstLocal*, uint8_t> exportedClasses{nullptr};
@@ -7851,6 +8417,13 @@ void compileOrThrow(BytecodeBuilder& bytecode, const ParseResult& parseResult, A
 
         for (auto [decl, fn] : compiler.classPodDefaultsFn)
             compiler.classLexicalOwner[fn] = decl;
+
+        // a class named by an annotation matters only when annotations are acted on
+        if (compiler.trustsTypeAnnotations())
+        {
+            Compiler::ShadowingTypeNameVisitor shadowingTypeNameVisitor(compiler.typeNamesShadowingClasses);
+            root->visit(&shadowingTypeNameVisitor);
+        }
     }
 
     // since access to some global objects may result in values that change over time, we block imports from non-readonly tables
@@ -7940,7 +8513,9 @@ void compileOrThrow(BytecodeBuilder& bytecode, const ParseResult& parseResult, A
             compiler.builtins,
             compiler.globals,
             options.libraryMemberTypeCb,
-            bytecode
+            bytecode,
+            &compiler.variables,
+            compiler.trustsTypeAnnotations()
         );
 
     for (AstExprFunction* expr : functions)

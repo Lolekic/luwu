@@ -104,6 +104,9 @@ inline bool lowerImpl(
 
     bool outputEnabled = options.includeAssembly || options.includeIr;
 
+    // Luwu (codegen logging): upstream guards `logger` only here and tests just the flag before each `logger->formatAppend`
+    // below, relying on callers that pass a null logger (CodeGenContext) never asking for IR or assembly
+    // output. Luwu also checks `logger` at each of those appends, falling back to `build.logAppend`.
     std::string emptyLog;
     IrToStringContext ctx{
         FFlag::LuauCodegenSharedLog ? (logger ? logger->text : emptyLog) : build.text,

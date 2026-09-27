@@ -1079,6 +1079,12 @@ void AstStatClass::visit(AstVisitor* visitor)
     LUAU_ASSERT(FFlag::DebugLuauUserDefinedClasses);
     if (visitor->visit(this))
     {
+        for (AstGenericType* generic : generics)
+            generic->visit(visitor);
+
+        for (AstGenericTypePack* genericPack : genericPacks)
+            genericPack->visit(visitor);
+
         if (primaryConstructor)
         {
             for (AstLocal* arg : primaryConstructor->args)

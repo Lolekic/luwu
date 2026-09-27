@@ -286,6 +286,7 @@ struct ConstPropState
 
         hashValueCache.clear();
         arrayValueCache.clear();
+        objectValueCache.clear();
 
         // While other map clears already prevent instValue keys from matching again, this saves memory and map size
         instValue.clear();
@@ -2774,8 +2775,7 @@ static void constPropInInst(ConstPropState& state, IrBuilder& build, IrFunction&
     case IrCmd::GET_CLOSURE_UPVAL_ADDR:
         break;
     case IrCmd::LOAD_OWNER_CLASS:
-        // Proto::ownerclass is fixed for the executing closure, so this is loop-invariant; nothing to
-        // propagate, but it is a candidate for CSE if a frame ever loads it more than once.
+        // Proto::ownerclass is fixed for the executing closure; there is nothing to propagate
         break;
     case IrCmd::TRY_CLASS_MEMBER_ADDR:
     case IrCmd::TRY_OBJECT_NAMECALL_ADDR:
@@ -3095,6 +3095,13 @@ static void constPropInInst(ConstPropState& state, IrBuilder& build, IrFunction&
     case IrCmd::BUFFER_ISFROZEN:
         break;
     case IrCmd::CLASS_ISINSTANCE:
+        // a value whose tag is known not to be an object is never an instance, so the branch on it folds
+        if (OP_A(inst).kind == IrOpKind::Constant && function.tagOp(OP_A(inst)) != LUA_TOBJECT)
+        {
+            substitute(function, inst, build.constInt(0));
+            break;
+        }
+
         // Pure function of (tag, value ptr, class ptr); two identical checks in a block can be CSE'd
         state.substituteOrRecord(inst, index);
         break;
@@ -3658,7 +3665,7 @@ static void constPropInInst(ConstPropState& state, IrBuilder& build, IrFunction&
     case IrCmd::FALLBACK_NEWOBJECT:
         // Construction writes the instance (and, for a user __init, the frame it lays out above it),
         // and applying fields can run an __index metamethod, i.e. arbitrary Lua.
-        state.invalidateRegisterRange(vmRegOp(OP_B(inst)), function.intOp(OP_D(inst)) == 1 ? 3 : 1);
+        state.invalidateRegisterRange(vmRegOp(OP_B(inst)), function.intOp(OP_D(inst)) == LBC_NEWOBJECT_INIT ? 3 : 1);
         state.invalidateUserCall();
         break;
     }

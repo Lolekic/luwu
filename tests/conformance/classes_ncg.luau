@@ -119,24 +119,30 @@ expectpass("declaring a class with methods leaves the surrounding locals intact"
     assert(Declared{ v = 41 }:bump() == 42)
 end)
 
--- LOP_NEWOBJECT is now emitted for a class with a private constructor too, which means the opcode --
--- not luaR_createobject's C frame -- is what enforces "a private constructor is only callable from
--- inside its own class". The authority is the executing closure's Proto::ownerclass. NEWOBJECT is
--- only emitted for a direct, statically resolved `ClassName(...)` callee, so pcall-laundered and
--- aliased calls still go through luaR_createobject; both must stay denied either way.
+-- LOP_NEWOBJECT is emitted for a class with a private constructor too, which means the opcode -- not
+-- luaR_createobject's C frame -- is what enforces "a private constructor is only callable from inside
+-- its own class". The authority is the executing closure's Proto::ownerclass. NEWOBJECT is only emitted
+-- for a direct, statically resolved `ClassName(...)` callee whose single result is used, so every
+-- construction here is bound to a local first: `return Acct(...)` is a multret call and would test
+-- luaR_createobject instead. pcall-laundered and aliased calls still go through luaR_createobject;
+-- both must stay denied either way.
 class Acct private (public owner: string, balance: number)
     private balance
 
     public function new(o: string, b: number): Acct
-        return Acct(o, b)
+        local a = Acct(o, b)
+        return a
     end
 
     public function nested(o: string, b: number): Acct
-        -- a closure lexically inside a method inherits ownerclass (luaR_stampownerclass is recursive)
-        local f = function()
-            return Acct(o, b)
+        -- a closure lexically inside a method inherits ownerclass (luaR_stampownerclass is recursive). Called
+        -- through a table field so O2 can't inline it: the construction has to run in the closure's own proto.
+        local holder = {}
+        holder.f = function()
+            local a = Acct(o, b)
+            return a
         end
-        return f()
+        return holder.f()
     end
 
     public function bal(self): number
@@ -152,7 +158,8 @@ class ExplicitInit
     end
 
     public function new(x: number): ExplicitInit
-        return ExplicitInit(x)
+        local e = ExplicitInit(x)
+        return e
     end
 end
 
@@ -171,11 +178,13 @@ end
 expectpass("a private constructor is not callable from outside, by any route", function()
     -- the direct call is the one that compiles to NEWOBJECT
     denied(function()
-        return Acct("c", 30)
+        local a = Acct("c", 30)
+        return a
     end, "direct call from outside")
 
     denied(function()
-        return ExplicitInit(1)
+        local e = ExplicitInit(1)
+        return e
     end, "direct call to a private __init from outside")
 
     -- these never become NEWOBJECT sites; they must stay denied on the luaR_createobject path.
@@ -191,7 +200,8 @@ expectpass("a private constructor is not callable from outside, by any route", f
     end, "aliased call")
 
     local function outsideHelper()
-        return Acct("f", 60)
+        local a = Acct("f", 60)
+        return a
     end
     denied(outsideHelper, "a plain local function outside the class")
 end)
@@ -394,7 +404,8 @@ end
 
 class NcgPrivatePrimary private (public const code: number)
     public function make(code: number): NcgPrivatePrimary
-        return NcgPrivatePrimary(code)
+        local p = NcgPrivatePrimary(code)
+        return p
     end
 end
 
@@ -487,7 +498,8 @@ class NcgSecret private (public const id: number)
 
     public function viaClosure(count: number): number
         local make = function(i)
-            return NcgSecret(i)
+            local s = NcgSecret(i)
+            return s
         end
         local sum = 0
         for i = 1, count do

@@ -83,7 +83,7 @@ declare class: {
 
 } // namespace
 
-TEST_SUITE_BEGIN("ClassesConformance");
+TEST_SUITE_BEGIN("TypeInferClasses");
 
 TEST_CASE_FIXTURE(ClassesFixture, "Point_tostring")
 {
@@ -345,9 +345,13 @@ end
     )");
 
     LUAU_REQUIRE_ERROR_COUNT(3, result);
-    CHECK_EQ("make_name", get<UnknownSymbol>(result.errors[0])->name);
-    CHECK_EQ("next_id", get<UnknownSymbol>(result.errors[1])->name);
-    CHECK_EQ("compute_price", get<UnknownSymbol>(result.errors[2])->name);
+    const char* expectedNames[] = {"make_name", "next_id", "compute_price"};
+    for (size_t i = 0; i < 3; ++i)
+    {
+        const UnknownSymbol* err = get<UnknownSymbol>(result.errors[i]);
+        REQUIRE(err);
+        CHECK_EQ(expectedNames[i], err->name);
+    }
 }
 
 TEST_CASE_FIXTURE(ClassesFixture, "class_pod_constructor_argument_optional_when_all_properties_have_defaults")
@@ -2010,8 +2014,12 @@ end
     )");
 
     LUAU_REQUIRE_ERROR_COUNT(2, result);
-    CHECK_EQ("Prefix", toString(get<TypeMismatch>(result.errors[0])->givenType));
-    CHECK_EQ("Prefix", toString(get<TypeMismatch>(result.errors[1])->givenType));
+    for (size_t i = 0; i < 2; ++i)
+    {
+        const TypeMismatch* err = get<TypeMismatch>(result.errors[i]);
+        REQUIRE(err);
+        CHECK_EQ("Prefix", toString(err->givenType));
+    }
 }
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "type_function_calling_itself_in_a_loop_with_classes_enabled")
@@ -2068,8 +2076,10 @@ local fine = Path(Comp("x"))
     LUAU_REQUIRE_ERROR_COUNT(3, result);
     for (size_t i = 0; i < 3; ++i)
     {
-        CHECK_EQ("Comp", toString(get<TypeMismatch>(result.errors[i])->wantedType));
-        CHECK_EQ("Other", toString(get<TypeMismatch>(result.errors[i])->givenType));
+        const TypeMismatch* err = get<TypeMismatch>(result.errors[i]);
+        REQUIRE(err);
+        CHECK_EQ("Comp", toString(err->wantedType));
+        CHECK_EQ("Other", toString(err->givenType));
     }
 }
 
@@ -2329,6 +2339,375 @@ local a: Item = Item
 
     LUAU_REQUIRE_ERROR_COUNT(1, result);
     CHECK_EQ("Expected this to be 'Item', but got 'class<Item>'", toString(result.errors[0]));
+}
+
+// The class's lines in its own module say nothing about the same lines of another module.
+TEST_CASE_FIXTURE(ClassesFixture, "private_checks_compare_modules_not_just_positions")
+{
+    ScopedFastFlag sffs[] = {
+        {FFlag::LuwuBetterUserDefinedClasses, true},
+        {FFlag::LuauExportValueSyntax, true},
+        {FFlag::LuauExportValueTypecheck, true},
+    };
+
+    fileResolver.source["game/A"] = R"(
+        export class Secret
+            private key: string
+            public const id: number
+            private function __init(self, k: string)
+                self.key = k
+                self.id = 1
+            end
+            public function make(k: string): Secret return Secret(k) end
+        end
+    )";
+
+    // Every access below sits inside `Secret`'s line range in game/A.
+    fileResolver.source["game/B"] = R"(
+        local A = require(game.A)
+        local s = A.Secret.make("x")
+        local k = s.key
+        local t = A.Secret("y")
+        s.id = 2
+    )";
+
+    CheckResult result = getFrontend().check("game/B");
+    LUAU_REQUIRE_ERROR_COUNT(3, result);
+    CHECK(get<PrivatePropertyAccess>(result.errors[0]));
+    CHECK(get<PrivateConstructorAccess>(result.errors[1]));
+    CHECK(get<ConstPropertyAssignment>(result.errors[2]));
+}
+
+TEST_CASE_FIXTURE(ClassesFixture, "const_fields_are_assigned_only_by_init_itself_on_its_own_self")
+{
+    ScopedFastFlag sff{FFlag::LuwuBetterUserDefinedClasses, true};
+
+    // The runtime authorizes the running closure, which must be `__init` itself, and only for the
+    // object in its `self`.
+    CheckResult result = check(R"(
+        class K
+            public const id: number
+            public function __init(self, id: number)
+                self.id = id
+                local function later() self.id = 3 end
+                later()
+                local other = K(1)
+                other.id = 4
+            end
+        end
+    )");
+
+    LUAU_REQUIRE_ERROR_COUNT(2, result);
+    REQUIRE(get<ConstPropertyAssignment>(result.errors[0]));
+    CHECK_EQ(result.errors[0].location.begin.line, 5);
+    REQUIRE(get<ConstPropertyAssignment>(result.errors[1]));
+    CHECK_EQ(result.errors[1].location.begin.line, 8);
+}
+
+TEST_CASE_FIXTURE(ClassesFixture, "generic_class_referring_to_itself_with_a_wrapped_parameter_is_reported")
+{
+    ScopedFastFlag sffs[] = {
+        {FFlag::LuwuBetterUserDefinedClasses, true},
+        {FFlag::LuwuGenericNominals, true},
+    };
+
+    // Each expansion of `A<{T}>` mentions a new instantiation, so it can't be expanded eagerly.
+    CheckResult result = check(R"(
+        class A<T>
+            v: T
+            nest: A<{T}>?
+        end
+        local a: A<number> = A { v = 1, nest = nil }
+    )");
+
+    LUAU_REQUIRE_ERROR_COUNT(1, result);
+    REQUIRE(get<RecursiveRestraintViolation>(result.errors[0]));
+    CHECK_EQ(result.errors[0].location.begin.line, 3);
+}
+
+TEST_CASE_FIXTURE(ClassesFixture, "generic_class_referring_to_itself_with_other_arguments_expands")
+{
+    ScopedFastFlag sffs[] = {
+        {FFlag::LuwuBetterUserDefinedClasses, true},
+        {FFlag::LuwuGenericNominals, true},
+    };
+
+    // Finitely many instantiations: another argument, or the parameters in another order.
+    CheckResult result = check(R"(
+        class List<T>
+            inner: {T}
+            other: List<string>?
+        end
+        class Pair<A, B>
+            a: A
+            b: B
+            flipped: Pair<B, A>?
+        end
+        local l: List<number> = List { inner = {1}, other = nil }
+        local o = l.other
+        local p: Pair<number, string> = Pair { a = 1, b = "x", flipped = nil }
+        local f = p.flipped
+    )");
+
+    LUAU_REQUIRE_NO_ERRORS(result);
+    CHECK_EQ("List<string>?", toString(requireType("o")));
+    CHECK_EQ("Pair<string, number>?", toString(requireType("f")));
+}
+
+TEST_CASE_FIXTURE(ClassesFixture, "generic_class_member_display_arguments_are_expanded")
+{
+    ScopedFastFlag sffs[] = {
+        {FFlag::LuwuBetterUserDefinedClasses, true},
+        {FFlag::LuwuGenericNominals, true},
+    };
+
+    // `R` never uses its parameter, so `A<T>` survives only in `R<A<T>>`'s type arguments.
+    CheckResult result = check(R"(
+        type R<T> = { R<T> }
+        class A<T>
+            r: R<A<T>>
+        end
+        local a: A<string> = A { r = {} }
+        local r = a.r
+    )");
+
+    LUAU_REQUIRE_NO_ERRORS(result);
+    CHECK_EQ("R<A<string>>", toString(requireType("r")));
+}
+
+TEST_CASE_FIXTURE(ClassesFixture, "reading_init_by_name_is_reported")
+{
+    ScopedFastFlag sff{FFlag::LuwuBetterUserDefinedClasses, true};
+
+    CheckResult result = check(R"(
+        class Cat
+            public name: string
+            public function __init(self, name: string)
+                self.name = name
+            end
+            public function reset(self)
+                self:__init("x")
+            end
+        end
+        class Dog
+            public name: string
+        end
+        local c = Cat("a")
+        local a = Cat.__init
+        local b = c.__init
+        local d = Cat["__init"]
+        local e = Dog.__init
+    )");
+
+    LUAU_REQUIRE_ERROR_COUNT(5, result);
+    const size_t lines[] = {7, 14, 15, 16, 17};
+    for (size_t i = 0; i < 5; ++i)
+    {
+        const ConstructorReadByName* err = get<ConstructorReadByName>(result.errors[i]);
+        REQUIRE(err);
+        CHECK_EQ(result.errors[i].location.begin.line, lines[i]);
+    }
+    CHECK_EQ(
+        "Cannot read '__init' of class 'Dog'; constructing the class with 'Dog(...)' is the only way to run it, and reading it here will raise "
+        "a runtime error",
+        toString(result.errors[4])
+    );
+}
+
+TEST_CASE_FIXTURE(ClassesFixture, "generic_class_instantiated_with_any_is_compatible")
+{
+    ScopedFastFlag sffs[] = {
+        {FFlag::LuwuBetterUserDefinedClasses, true},
+        {FFlag::LuwuGenericNominals, true},
+    };
+
+    CheckResult result = check(R"(
+        class A<T>
+            v: T
+        end
+        class P<T, U>
+            t: T
+            u: U
+        end
+        local function f(x: A<any>, y: A<string>)
+            local s: A<string> = x
+            local t: A<any> = y
+        end
+        local a: A<string> = A { v = nil :: any }
+        local function g(z: A<number>, p: P<any, number>)
+            local w: A<string> = z
+            local q: P<string, string> = p
+        end
+    )");
+
+    // `any` suppresses only its own argument's mismatch.
+    LUAU_REQUIRE_ERROR_COUNT(2, result);
+    REQUIRE(get<TypeMismatch>(result.errors[0]));
+    CHECK_EQ(result.errors[0].location.begin.line, 14);
+    REQUIRE(get<TypeMismatch>(result.errors[1]));
+    CHECK_EQ(result.errors[1].location.begin.line, 15);
+}
+
+TEST_CASE_FIXTURE(ClassesFixture, "generic_class_value_against_its_object_is_spelled_as_class")
+{
+    ScopedFastFlag sffs[] = {
+        {FFlag::LuwuBetterUserDefinedClasses, true},
+        {FFlag::LuwuGenericNominals, true},
+    };
+
+    CheckResult result = check(R"(
+        class Box<T>
+            v: T
+        end
+        local b = Box { v = 1 }
+        local c: class<Box<number>> = b
+    )");
+
+    LUAU_REQUIRE_ERROR_COUNT(1, result);
+    CHECK_EQ("Expected this to be 'class<Box>', but got 'Box<number>'", toString(result.errors[0]));
+}
+
+TEST_CASE_FIXTURE(ClassesFixture, "uninstantiable_class_is_not_constructed_by_another_class_of_the_same_name")
+{
+    ScopedFastFlag sffs[] = {
+        {FFlag::LuwuBetterUserDefinedClasses, true},
+        {FFlag::LuauExportValueSyntax, true},
+        {FFlag::LuauExportValueTypecheck, true},
+    };
+
+    fileResolver.source["game/A"] = R"(
+        export class Node
+            public v: number
+        end
+    )";
+
+    fileResolver.source["game/B"] = R"(
+        class Node
+            public v: number
+            private function __init(self, v: number)
+                self.v = v
+            end
+            public function other(self)
+                local Other = require(game.A).Node
+                local Node = Other
+                return Node { v = 1 }
+            end
+        end
+        return Node
+    )";
+
+    CheckResult result = getFrontend().check("game/B");
+    LUAU_REQUIRE_ERROR_COUNT(1, result);
+    CHECK(get<UninstantiableClass>(result.errors[0]));
+}
+
+TEST_CASE_FIXTURE(ClassesFixture, "typeof_class_hint_only_names_a_type_that_resolves_here")
+{
+    ScopedFastFlag sffs[] = {
+        {FFlag::LuwuBetterUserDefinedClasses, true},
+        {FFlag::LuauExportValueSyntax, true},
+        {FFlag::LuauExportValueTypecheck, true},
+    };
+
+    fileResolver.source["game/A"] = R"(
+        export class Node
+            public v: number
+        end
+    )";
+
+    fileResolver.source["game/B"] = R"(
+        local A = require(game.A)
+        local x: typeof(A.Node) = A.Node
+        class Local
+            public v: number
+        end
+        local L = Local
+        local z: typeof(L) = L
+    )";
+
+    CheckResult result = getFrontend().check("game/B");
+    LUAU_REQUIRE_ERROR_COUNT(2, result);
+    CHECK_EQ("Use 'class<T>', where T is the type of 'Node' objects, instead of 'typeof(A.Node)' to get the class of 'Node'", toString(result.errors[0]));
+    CHECK_EQ("Use 'class<Local>' instead of 'typeof(L)' to get the class of 'Local'", toString(result.errors[1]));
+}
+
+TEST_CASE_FIXTURE(ClassesFixture, "annotate_writes_generic_class_type_arguments")
+{
+    ScopedFastFlag sffs[] = {
+        {FFlag::LuwuBetterUserDefinedClasses, true},
+        {FFlag::LuwuGenericNominals, true},
+    };
+
+    std::string annotated = decorateWithTypes(R"(
+class A<T>
+    v: T
+end
+local a: A<number> = A { v = 1 }
+local n = a
+)");
+
+    CHECK_MESSAGE(annotated.find("local n:A<number>=") != std::string::npos, annotated);
+}
+
+TEST_CASE_FIXTURE(ClassesFixture, "instance_method_through_the_class_value")
+{
+    ScopedFastFlag sff{FFlag::LuwuBetterUserDefinedClasses, true};
+
+    CheckResult result = check(R"(
+        class Bag
+            public n: number
+            public function add(self, k: number): number return self.n + k end
+            private function secret(self): number return self.n end
+            public function peek(b: Bag): number return Bag.secret(b) end
+        end
+        class Dog
+            public n: number
+        end
+        local b = Bag { n = 1 }
+        local x = Bag.add(b, 2)
+        local f = Bag.add
+        local y: number = f(b, 3)
+        local wrong = Bag.add(Dog { n = 1 }, 2)
+        local hidden = Bag.secret(b)
+    )");
+
+    LUAU_REQUIRE_ERROR_COUNT(2, result);
+    CHECK_EQ("number", toString(requireType("x")));
+    CHECK_EQ("(Bag, number) -> number", toString(requireType("f")));
+
+    const TypeMismatch* tm = get<TypeMismatch>(result.errors[0]);
+    REQUIRE(tm);
+    CHECK_EQ(result.errors[0].location.begin.line, 14);
+    CHECK_EQ("Bag", toString(tm->wantedType));
+    CHECK_EQ("Dog", toString(tm->givenType));
+
+    REQUIRE(get<PrivatePropertyAccess>(result.errors[1]));
+    CHECK_EQ(result.errors[1].location.begin.line, 15);
+}
+
+TEST_CASE_FIXTURE(ClassesFixture, "generic_instance_method_through_the_class_value")
+{
+    ScopedFastFlag sffs[] = {
+        {FFlag::LuwuBetterUserDefinedClasses, true},
+        {FFlag::LuwuGenericNominals, true},
+    };
+
+    // Nothing instantiates the class's `T` when the method is read through the class value, so the
+    // method is generic over it.
+    CheckResult result = check(R"(
+        class Box<T>
+            public v: T
+            public function get(self): T return self.v end
+        end
+        local b: Box<number> = Box { v = 1 }
+        local s: Box<string> = Box { v = "x" }
+        local n = Box.get(b)
+        local str = Box.get(s)
+    )");
+
+    LUAU_REQUIRE_NO_ERRORS(result);
+    CHECK_EQ("number", toString(requireType("n")));
+    CHECK_EQ("string", toString(requireType("str")));
 }
 
 TEST_SUITE_END();

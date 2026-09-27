@@ -727,6 +727,23 @@ TEST_CASE_FIXTURE(Fixture, "toStringNamedFunction_id")
     CHECK_EQ("id<a>(x: a): a", toStringNamedFunction("id", *ftv));
 }
 
+TEST_CASE_FIXTURE(Fixture, "toStringNamedFunction_defines_only_the_cycle_names_it_used")
+{
+    DOES_NOT_PASS_OLD_SOLVER_GUARD();
+
+    // `Node` is a cycle, but it prints as its name, so no `t1` is used and none is defined.
+    CheckResult result = check(R"(
+        type Node = { next: Node? }
+        local function f(n: Node) end
+    )");
+
+    TypeId ty = requireType("f");
+    const FunctionType* ftv = get<FunctionType>(follow(ty));
+    REQUIRE(ftv);
+
+    CHECK_EQ("f(n: Node): ()", toStringNamedFunction("f", *ftv));
+}
+
 TEST_CASE_FIXTURE(Fixture, "toStringNamedFunction_map")
 {
     CheckResult result = check(R"(

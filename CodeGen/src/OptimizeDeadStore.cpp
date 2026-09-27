@@ -1218,7 +1218,7 @@ static void markDeadStoresInInst(RemoveDeadStoreState& state, IrBuilder& build, 
         break;
     case IrCmd::CHECK_CLASS_FIELDS_CONSTRUCTIBLE:
         // This instruction has several jumps to the exit in the lowering and that prevents exit sync record from being generated
-        state.checkLiveIns(OP_C(inst), index, false);
+        state.checkLiveIns(OP_B(inst), index, false);
         break;
     case IrCmd::CHECK_BUFFER_LEN:
         state.checkLiveIns(OP_F(inst), index, true);

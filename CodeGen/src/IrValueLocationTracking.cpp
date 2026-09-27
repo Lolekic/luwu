@@ -149,7 +149,7 @@ void IrValueLocationTracking::beforeInstLowering(IrInst& inst)
         invalidateRestoreVmRegs(vmRegOp(OP_B(inst)), 3);
         break;
     case IrCmd::FALLBACK_NEWOBJECT:
-        invalidateRestoreVmRegs(vmRegOp(OP_B(inst)), function.intOp(OP_D(inst)) == 1 ? 3 : 1);
+        invalidateRestoreVmRegs(vmRegOp(OP_B(inst)), function.intOp(OP_D(inst)) == LBC_NEWOBJECT_INIT ? 3 : 1);
         break;
 
         // Make sure all VmReg referencing instructions are handled explicitly (only register reads here)

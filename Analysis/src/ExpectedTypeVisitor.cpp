@@ -179,11 +179,17 @@ bool ExpectedTypeVisitor::visit(AstExprCall* expr)
     // constructor: `Cat { ... }`). Such calls forward the callee as an implicit leading argument
     // (see OverloadResolver::testFunctionOrCallMetamethod) that doesn't correspond to any AST
     // argument, so we need to skip it below the same way we skip an explicit `self` argument.
+    // An overloaded callee (an intersection of functions) also resolves through
+    // `astOverloadResolvedTypes`, with no extra argument, so ask for the metamethod itself.
     bool viaCallMetamethod = false;
     if (ty)
     {
         if (TypeId* calleeTy = astTypes->find(expr->func))
-            viaCallMetamethod = get<FunctionType>(follow(*calleeTy)) == nullptr;
+        {
+            ErrorVec metatableErrors;
+            viaCallMetamethod = get<FunctionType>(follow(*calleeTy)) == nullptr &&
+                                findMetatableEntry(builtinTypes, metatableErrors, *calleeTy, "__call", expr->func->location).has_value();
+        }
     }
     else
         ty = astTypes->find(expr->func);

@@ -611,7 +611,8 @@ typedef struct LuauClass
     // Mapping from member name to offset.
     LuaTable* memberstooffset;
 
-    // Mapping from offset to member name.
+    // Mapping from offset to member name. NULL at `initoffset`: `__init` is only ever resolved by name
+    // (see luaR_sealclassshape).
     TString** offsettomember;
 
     // Metatable for this *class object*. At time of writing this only contains
@@ -641,8 +642,9 @@ typedef struct LuauClass
     // instead of the default POD table-copy constructor.
     bool hascustominit;
 
-    // The member offset of `__init` (index `staticmembers` with it minus `numberofinstancemembers`),
-    // only meaningful when `hascustominit` is set. Used by construction and the `const`-write check.
+    // The member offset of `__init` (index `staticmembers` with it minus `numberofinstancemembers`).
+    // Every class has an `__init` member; its slot holds a closure only when `hascustominit` is set.
+    // Used by construction, the private-constructor check and the `const`-write check.
     uint32_t initoffset;
 
     // Set when this class's `__init` is the one a primary constructor implies (`class Cat(name)`),
@@ -656,9 +658,8 @@ typedef struct LuauClass
     // LBC_CLASSMEMBER_* in Luau/Bytecode.h). Owned by this class object; freed in luaR_freeclass.
     uint8_t* memberflags;
 
-    // True if any entry in `memberflags` has LBC_CLASSMEMBER_PRIVATE set, or the class has a `const`
-    // member (which blocks reading `__init`, see LBC_CLASSMEMBER_INITBLOCKED). Lets the interpreter
-    // skip the private-access brand check entirely for classes without either.
+    // True if any entry in `memberflags` has LBC_CLASSMEMBER_PRIVATE set. Lets a member access whose
+    // slot is already cached skip the private-access check entirely for classes without one.
     bool hasprivatemembers;
 
     // True if any entry in `memberflags` has LBC_CLASSMEMBER_CONST set. Same idea as
@@ -681,10 +682,6 @@ typedef struct LuauClass
     // re-evaluated per construction, so the whole class falls back to `__defaults`). Owned by this
     // class object; freed in luaR_freeclass and marked in traverseclass.
     TValue* memberdefaults;
-
-    // Debug name of the constructor closure (e.g. "Foo() constructor"), shown
-    // in stack traces. Owned by this class object; freed in luaR_freeclass.
-    char* ctordebugname;
 
 } LuauClass;
 

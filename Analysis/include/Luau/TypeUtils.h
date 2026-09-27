@@ -457,4 +457,12 @@ std::optional<TypePackId> getApproximateReturnTypeForFunctionCall(TypeId ty);
  */
 std::optional<std::string> describeOptionalOperands(TypeId left, std::optional<TypeId> right);
 
+/**
+ * Luwu Classes (rfcs/classes.md): whether `location`, a position in module `moduleName`, lies inside
+ * `cls`'s class declaration (for `private` members and private constructors). A class's location
+ * belongs to the module that declares it, so a location in any other module is outside, whatever
+ * its line and column.
+ */
+bool isInsideClassDeclaration(const ExternType* cls, const ModuleName& moduleName, const Location& location);
+
 } // namespace Luau

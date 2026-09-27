@@ -741,15 +741,12 @@ enum class IrCmd : uint8_t
     OBJECT_MEMBER_ADDR,
 
     // Luwu Classes (rfcs/classes.md): guard that a class can be constructed natively by NEWOBJECT's FIELDS
-    // form -- the same shape rules executeNEWOBJECT checks, restricted to the case that is nothing but a
-    // member-by-member copy: the constructor is the default or a primary constructor, there is no
-    // `__defaults` closure and no constant default to preserve (so every member is written), the class
-    // has exactly the expected number of instance members, and its `__init` (if any) is either public or
-    // private with the executing closure belonging to the class (luaR_checkprivateconstructor's rule; a
-    // private constructor used from outside falls back, and the fallback raises). Jumps otherwise.
+    // form as nothing but a member-by-member copy. The compiler guarantees the class's shape (see
+    // VM_CASE(LOP_NEWOBJECT)); what is left to check at runtime is that the class has no constant default
+    // to preserve, and that its `__init`, if private, is used from inside the class
+    // (luaR_checkprivateconstructor's rule; from outside the fallback raises). Jumps otherwise.
     // A: pointer (LuauClass)
-    // B: unsigned int (expected number of instance members)
-    // C: block/vmexit/undef
+    // B: block/vmexit/undef
     // When undef is specified instead of a block, execution is aborted on check failure
     CHECK_CLASS_FIELDS_CONSTRUCTIBLE,
 
@@ -978,8 +975,8 @@ enum class IrCmd : uint8_t
     // A: unsigned int (bytecode instruction index)
     // B: Rn (instance destination, also the base of the constructor's register window)
     // C: Rn (class)
-    // D: int (form: 0 default constructor, 1 user __init, 2 fields passed positionally)
-    // E: int (AUX: argument count for forms 0 and 1, field count for form 2)
+    // D: int (form: LBC_NEWOBJECT_DEFAULT, LBC_NEWOBJECT_INIT or LBC_NEWOBJECT_FIELDS)
+    // E: int (AUX: argument count for DEFAULT and INIT, field count for FIELDS)
     FALLBACK_NEWOBJECT,
 
     // Luwu Classes (rfcs/classes.md): add a member (a method, a primary constructor's synthesized

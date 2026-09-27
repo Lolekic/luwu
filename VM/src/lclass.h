@@ -18,33 +18,33 @@ inline size_t luaR_objectsize(uint32_t nummembers)
 // Luau/Bytecode.h), the same bits the compiler serializes into LBC_CONSTANT_CLASS_SHAPE.
 
 /**
- * Allocate and return a new class value.
+ * Allocate and return a new class value with room for its members, for the loader to fill in:
+ * `offsettomember` (every entry NULL; `__init`'s stays NULL after luaR_sealclassshape), `memberflags` (every entry 0), `memberstooffset` (empty),
+ * `memberdefaults` when `hasmemberdefaults` (every entry nil, otherwise NULL) and `staticmembers`
+ * (every entry nil). Call luaR_sealclassshape once they are filled.
+ *
+ * The class owns every buffer from the moment it is registered with the GC, so an allocation failure
+ * anywhere in the loader leaves nothing to leak.
  * @param name The name of this class. This does not have to be unique within a program.
- * @param memberstooffset A table mapping member names to their offset within the class
- * @param offsettomember An array of length `numberofinstancemembers + numberofstaticmembers` where
- * each entry is the name of the member at the specified offset.
- * @param memberflags An array of length `numberofinstancemembers + numberofstaticmembers`, parallel
- * to `offsettomember`, of LBC_CLASSMEMBER_* bits for each member. Ownership is transferred to the
- * new class value.
  * @param numberofinstancemembers The number of instance members (fields) this class has.
- * @param numberofstaticmembers The number of static members (only methods today) this class has.
+ * @param numberofstaticmembers The number of static members (methods, including `__init`) this class has.
  */
 LUAI_FUNC LuauClass* luaR_newclass(
     lua_State* L,
     TString* name,
-    LuaTable* memberstooffset,
-    TString** offsettomember,
-    uint8_t* memberflags,
     uint32_t numberofinstancemembers,
-    uint32_t numberofstaticmembers
+    uint32_t numberofstaticmembers,
+    bool hasmemberdefaults
 );
 
 /**
- * Hands `classdef` ownership of `defaults`, an array of `numberofinstancemembers` TValues holding
- * each instance member's constant default (nil where a member has none). Set at load time from
- * LBC_CONSTANT_CLASS_SHAPE; see LuauClass::memberdefaults.
+ * Finishes a class the loader has filled in (see luaR_newclass): derives the summary bits from
+ * `memberflags`, blocks reading `__init` by name, and makes `memberstooffset` read-only.
  */
-LUAI_FUNC void luaR_setmemberdefaults(lua_State* L, LuauClass* classdef, TValue* defaults);
+LUAI_FUNC void luaR_sealclassshape(lua_State* L, LuauClass* classdef);
+
+// The number of bytes `classdef` owns outside its members-to-offset table, for GC accounting.
+LUAI_FUNC size_t luaR_classsize(const LuauClass* classdef);
 
 /**
  * Allocates an instance of `classdef` with every member set to its constant default (or nil), ready
@@ -65,9 +65,20 @@ LUAI_FUNC void luaR_applyobjectfields(lua_State* L, LuauClass* classdef, LuauObj
 
 /**
  * As luaR_applyobjectfields, for an argument that is not a plain table: each field is read with the
- * generic indexing path, so an __index metamethod is honoured. May call back into Lua.
+ * generic indexing path, so an __index metamethod is honoured, and a private field of an object is
+ * read with the access rights of the running Lua frame. A nil argument applies nothing. May call back
+ * into Lua. `object` must be anchored where the collector can see it.
  */
 LUAI_FUNC void luaR_applyobjectfieldsslow(lua_State* L, LuauClass* classdef, LuauObject* object, const TValue* arg);
+
+/**
+ * The POD constructor: runs `classdef`'s `__defaults` if it has one, then applies the fields of
+ * `args[0]` (see luaR_applyobjectfields). `nargs` is the number of constructor arguments at `args`; 0,
+ * or 1 that is nil, applies nothing, and more than 1 raises. Private fields of an object argument are
+ * read with the access rights of `accessor`, the Lua closure constructing (NULL for native code).
+ * `object` must be anchored where the collector can see it; it gets every write barrier it needs.
+ */
+LUAI_FUNC void luaR_initpodobject(lua_State* L, LuauClass* classdef, LuauObject* object, StkId args, int nargs, const Closure* accessor);
 
 /**
  * Returns true if `cl` is `classdef`'s own `__init` closure specifically (stricter than
@@ -91,34 +102,39 @@ LUAI_FUNC bool luaR_closureownsprivateaccess(const LuauClass* classdef, const Cl
 
 /**
  * Errors (via luaG_privateaccesserror) if the member at `offset` is private and `cl` is not one
- * of `classdef`'s own methods, or (via luaG_blockedinitaccesserror) if it is an `__init` blocked by
- * LBC_CLASSMEMBER_INITBLOCKED, whoever `cl` is. `key` is only used for the error message.
- *
- * Callers should only call this when `classdef->hasprivatemembers` is set, so that public
- * access from outside the class (the common case) costs nothing beyond that one flag check.
+ * of `classdef`'s own methods, or (via luaG_blockedinitaccesserror) if it is `__init`
+ * (LBC_CLASSMEMBER_INITBLOCKED), whoever `cl` is. `key` is only used for the error message.
+ * Readers call it through luaR_checkprivateaccessfast.
  */
 LUAI_FUNC void luaR_checkprivateaccess(lua_State* L, const TValue* key, const LuauClass* classdef, const Closure* cl, uint32_t offset);
+
+// True when constructing `classdef` has to pass luaR_checkprivateconstructor.
+LUAU_FORCEINLINE bool luaR_hasprivateconstructor(const LuauClass* classdef)
+{
+    return classdef->hascustominit && (classdef->memberflags[classdef->initoffset] & LBC_CLASSMEMBER_PRIVATE) != 0;
+}
 
 /**
  * The private-constructor check construction performs: errors if `classdef`'s custom `__init` is
  * private and `cl` is not one of `classdef`'s own methods. Unlike luaR_checkprivateaccess this ignores
- * LBC_CLASSMEMBER_INITBLOCKED, which restricts reading `__init`, not constructing with it.
+ * LBC_CLASSMEMBER_INITBLOCKED, which restricts reading `__init`, not constructing with it. Callers
+ * test luaR_hasprivateconstructor first.
  */
 LUAI_FUNC void luaR_checkprivateconstructor(lua_State* L, const LuauClass* classdef, const Closure* cl);
 
 /**
- * Errors (via luaG_constassignerror) if the member at `offset` is const and `cl` is not
- * `classdef`'s own `__init` closure. `key` is only used for the error message.
+ * Errors if the member at `offset` of `object` is const, unless the writer is the object's class's
+ * own `__init` (`cl`, the closure of the running frame L->ci) writing the object it is constructing,
+ * its `self` parameter. `key` is only used for the error message.
  *
- * Callers should only call this when `classdef->hasconstmembers` is set.
+ * Callers should only call this when the class's `hasconstmembers` is set.
  */
-LUAI_FUNC void luaR_checkconstassign(lua_State* L, const TValue* key, const LuauClass* classdef, const Closure* cl, uint32_t offset);
+LUAI_FUNC void luaR_checkconstassign(lua_State* L, const TValue* key, const LuauObject* object, const Closure* cl, uint32_t offset);
 
-// A class with any private member sets `hasprivatemembers`, but most of its members are usually
-// public, and the accessing closure usually owns the class anyway -- so the interpreter used to make
-// an out-of-line authorization call for *every* member access on such a class. Testing the accessed
-// member's own bit here keeps that call off the common path entirely; only an actually private (or
-// const, when writing) member pays for it. Worth ~1.3ns per access, interpreted.
+// Every member read that resolved its offset by name runs this, as does a read from a cached slot on
+// a class with `hasprivatemembers`. Testing the member's own bits keeps the out-of-line authorization
+// call to the members that are actually private or `__init` (which is only ever resolved by name, see
+// luaR_sealclassshape).
 LUAU_FORCEINLINE void luaR_checkprivateaccessfast(
     lua_State* L,
     const TValue* key,
@@ -134,13 +150,13 @@ LUAU_FORCEINLINE void luaR_checkprivateaccessfast(
 LUAU_FORCEINLINE void luaR_checkconstassignfast(
     lua_State* L,
     const TValue* key,
-    const LuauClass* classdef,
+    const LuauObject* object,
     const Closure* cl,
     uint32_t offset
 )
 {
-    if (LUAU_UNLIKELY((classdef->memberflags[offset] & LBC_CLASSMEMBER_CONST) != 0))
-        luaR_checkconstassign(L, key, classdef, cl, offset);
+    if (LUAU_UNLIKELY((object->lclass->memberflags[offset] & LBC_CLASSMEMBER_CONST) != 0))
+        luaR_checkconstassign(L, key, object, cl, offset);
 }
 
 /**
@@ -159,26 +175,16 @@ LUAI_FUNC void luaR_freeclass(lua_State* L, LuauClass* classdef, lua_Page* page)
  *  - The constructor arguments (for the POD constructor, an optional indexable value)
  *
  * This function checks a private constructor, allocates a new object and then either calls a custom
- * `__init` with the arguments (yieldably) or applies the indexable's fields over the members' defaults.
- * The object is the single result.
+ * `__init` with the arguments (yieldably) or runs the POD constructor (luaR_initpodobject). The
+ * object is the single result.
  */
 LUAI_FUNC int luaR_createobject(lua_State* L);
 
-/**
- * The default (POD) `__init` constructor, invoked when a class with no user-defined `__init`
- * is called via `Class(...)`, `Class.__init(...)`, or `object:__init(...)`. Expects the stack
- * to be [ self, optional indexable value ], matching luaR_createobject's non-custom-init path.
- */
-LUAI_FUNC int luaR_defaultinit(lua_State* L);
-
-/**
- * Registers luaR_defaultinit as `classdef`'s `__init` static member, so it's directly
- * callable (`Class.__init`/`object:__init`) for classes with no user-defined `__init`.
- * `classdef->memberstooffset` must already have an `__init` entry reserved for it.
- */
-LUAI_FUNC void luaR_adddefaultinit(lua_State* L, LuauClass* classdef);
-
 LUAI_FUNC void luaR_freeobject(lua_State* L, LuauObject* object, lua_Page* page);
+
+// A member's offset is cached in its instruction's 8-bit C operand (the slot the fast paths check). A
+// larger offset doesn't fit: it is never cached, and that member is looked up by name every time.
+#define LUAR_MAX_CACHED_MEMBER_SLOT 0xff
 
 #define luaR_checkoffsetinbounds(object, offset) (offset < (object)->lclass->numberofallmembers)
 

@@ -1116,19 +1116,10 @@ static bool couldBeNil(TypeId ty)
 {
     ty = follow(ty);
 
-    if (isNil(ty))
-        return true;
-
     if (const UnionType* utv = get<UnionType>(ty))
-    {
-        for (TypeId option : utv->options)
-        {
-            if (couldBeNil(option))
-                return true;
-        }
-    }
+        return std::any_of(begin(utv), end(utv), isNil);
 
-    return false;
+    return isNil(ty);
 }
 
 std::optional<std::string> describeOptionalOperands(TypeId left, std::optional<TypeId> right)
@@ -1148,6 +1139,11 @@ std::optional<std::string> describeOptionalOperands(TypeId left, std::optional<T
         return std::string{"the right operand could be `nil`"};
 
     return std::nullopt;
+}
+
+bool isInsideClassDeclaration(const ExternType* cls, const ModuleName& moduleName, const Location& location)
+{
+    return cls->definitionLocation && cls->definitionModuleName == moduleName && cls->definitionLocation->encloses(location);
 }
 
 } // namespace Luau

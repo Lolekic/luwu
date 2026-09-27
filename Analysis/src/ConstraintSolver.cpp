@@ -367,6 +367,9 @@ struct InfiniteTypeFinder : IterativeTypeVisitor
     const InstantiationSignature& signature;
     NotNull<Scope> scope;
     bool foundInfiniteType = false;
+    // Luwu Classes (rfcs/classes.md): the reference that makes a generic class infinite, when
+    // `signature.fn` is one (see isInfiniteSelfReference).
+    std::optional<TypeId> infiniteSelfReference;
 
     explicit InfiniteTypeFinder(ConstraintSolver* solver, const InstantiationSignature& signature, NotNull<Scope> scope)
         : IterativeTypeVisitor("InfiniteTypeFinder", /* skipBoundTypes */ true)
@@ -396,6 +399,18 @@ struct InfiniteTypeFinder : IterativeTypeVisitor
         // have two different type aliases.
         if (follow(tf->type) != follow(signature.fn.type))
             return true;
+
+        if (isGenericNominalTemplate())
+        {
+            if (isInfiniteSelfReference(petv))
+            {
+                foundInfiniteType = true;
+                infiniteSelfReference = ty;
+                return false;
+            }
+
+            return true;
+        }
 
         // We want to check that the arguments to this pending expansion
         // type are exactly the generic arguments provided.
@@ -432,6 +447,45 @@ struct InfiniteTypeFinder : IterativeTypeVisitor
                 foundInfiniteType = true;
                 return false;
             }
+        }
+
+        return false;
+    }
+
+    bool isGenericNominalTemplate() const
+    {
+        return FFlag::LuwuGenericNominals && get<ExternType>(follow(signature.fn.type));
+    }
+
+    // Luwu Classes (rfcs/classes.md): a class is nominal, so a reference to itself inside its own
+    // body is only infinite when a type argument wraps one of the class's parameters (`A<{T}>`,
+    // `A<A<T>>`): each instantiation then mentions a new one. `A<string>` and `Pair<B, A>` reach
+    // finitely many instantiations and expand normally. Upstream rejects every self-reference with
+    // different arguments, which is right for structural aliases.
+    //
+    // `petv` must be a reference to this class (`signature.fn`).
+    bool isInfiniteSelfReference(const PendingExpansionType& petv) const
+    {
+        DenseHashSet<const void*> classParams{nullptr};
+        for (const GenericTypeDefinition& param : signature.fn.typeParams)
+            classParams.insert(follow(param.ty));
+        for (const GenericTypePackDefinition& param : signature.fn.typePackParams)
+            classParams.insert(follow(param.tp));
+
+        for (TypeId arg : petv.typeArguments)
+        {
+            arg = follow(arg);
+            bool wrapsClassParam = !classParams.contains(arg) && containsGeneric(arg, NotNull{&classParams});
+            if (wrapsClassParam)
+                return true;
+        }
+
+        for (TypePackId arg : petv.packArguments)
+        {
+            arg = follow(arg);
+            bool wrapsClassParam = !classParams.contains(arg) && containsGeneric(arg, NotNull{&classParams});
+            if (wrapsClassParam)
+                return true;
         }
 
         return false;
@@ -1032,6 +1086,20 @@ bool ConstraintSolver::tryDispatch(const PackSubtypeConstraint& c, NotNull<const
     return true;
 }
 
+// Luwu Classes (rfcs/classes.md): a generic class's method as read through the class value, where
+// nothing instantiates the class's generics, so the method is generic over them itself.
+TypeId ConstraintSolver::quantifyOverClassGenerics(TypeId methodTy, const GeneralizationConstraint& c)
+{
+    const FunctionType* ftv = get<FunctionType>(methodTy);
+    if (!ftv)
+        return methodTy;
+
+    FunctionType quantified = *ftv;
+    quantified.generics.insert(quantified.generics.begin(), c.classGenerics.begin(), c.classGenerics.end());
+    quantified.genericPacks.insert(quantified.genericPacks.begin(), c.classGenericPacks.begin(), c.classGenericPacks.end());
+    return arena->addType(std::move(quantified));
+}
+
 bool ConstraintSolver::tryDispatch(const GeneralizationConstraint& c, NotNull<const Constraint> constraint)
 {
     TypeId generalizedType = follow(c.generalizedType);
@@ -1061,11 +1129,16 @@ bool ConstraintSolver::tryDispatch(const GeneralizationConstraint& c, NotNull<co
                 fty->deprecatedInfo = std::make_shared<AstAttr::DeprecatedInfo>(c.deprecatedInfo);
             }
         }
+
+        if (c.classValueMethodType)
+            bind(constraint, *c.classValueMethodType, quantifyOverClassGenerics(follow(generalizedType), c));
     }
     else
     {
         reportError(CodeTooComplex{}, constraint->location);
         bind(constraint, c.generalizedType, builtinTypes->errorType);
+        if (c.classValueMethodType)
+            bind(constraint, *c.classValueMethodType, builtinTypes->errorType);
     }
 
     // We check if this member is initialized and then access it, but
@@ -1470,6 +1543,13 @@ bool ConstraintSolver::tryDispatch(const TypeAliasExpansionConstraint& c, NotNul
 
     if (itf.foundInfiniteType)
     {
+        // Luwu Classes (rfcs/classes.md): upstream reports a type alias's violation from the alias
+        // statement (TypeChecker2, `invalidTypeAliases`); a class has no such statement to hang it on,
+        // so the solver reports the reference that causes it. The expansion that ran into it gets the
+        // error type, like a use of an invalid alias.
+        if (itf.infiniteSelfReference)
+            reportInfiniteSelfReference(*itf.infiniteSelfReference, follow(tf->type), constraint->location);
+
         bindResult(builtinTypes->errorType);
         constraint->scope->invalidTypeAliases[petv->name.value] = constraint->location;
         return true;
@@ -1591,6 +1671,9 @@ bool ConstraintSolver::tryDispatch(const TypeAliasExpansionConstraint& c, NotNul
 
                 if (!shared && prop.writeTy && isBlocked(follow(*prop.writeTy)))
                     prop.writeTy = deferProp(follow(*prop.writeTy));
+
+                if (prop.readTy)
+                    queuePendingMemberExpansions(*prop.readTy, constraint);
             }
         }
     }
@@ -4332,6 +4415,61 @@ void ConstraintSolver::reportError(TypeError e)
 {
     errors.emplace_back(std::move(e));
     errors.back().moduleName = module->name;
+}
+
+// Also expands a table's display arguments, which InstantiationQueuer doesn't visit.
+struct MemberExpansionQueuer : InstantiationQueuer
+{
+    using InstantiationQueuer::InstantiationQueuer;
+    using InstantiationQueuer::visit;
+
+    bool visit(TypeId ty, const TableType& ttv) override
+    {
+        for (TypeId arg : ttv.instantiatedTypeParams)
+            traverse(arg);
+
+        return true;
+    }
+};
+
+void ConstraintSolver::queuePendingMemberExpansions(TypeId memberTy, NotNull<const Constraint> constraint)
+{
+    // A member that is itself pending is deferred by the caller instead.
+    if (get<PendingExpansionType>(follow(memberTy)))
+        return;
+
+    MemberExpansionQueuer queuer{constraint->scope, constraint->location, this};
+    queuer.run(memberTy);
+}
+
+void ConstraintSolver::reportInfiniteSelfReference(TypeId reference, TypeId classTemplate, const Location& expansionLocation)
+{
+    // The reference is written inside the class, and the expansion constraint generated for it
+    // carries that location (it is still unsolved: the reference is unexpanded). The expansion that
+    // found it can be any use of the class, and a use can also queue another expansion of the same
+    // reference from wherever it instantiates the class.
+    Location location = expansionLocation;
+    if (const ExternType* templateEtv = get<ExternType>(classTemplate))
+    {
+        for (NotNull<const Constraint> c : unsolvedConstraints)
+        {
+            const TypeAliasExpansionConstraint* expansion = get<TypeAliasExpansionConstraint>(*c);
+            bool isThisReference = expansion && follow(expansion->target) == reference;
+            if (isThisReference && isInsideClassDeclaration(templateEtv, module->name, c->location))
+            {
+                location = c->location;
+                break;
+            }
+        }
+    }
+
+    for (const TypeError& e : errors)
+    {
+        if (e.location == location && get<RecursiveRestraintViolation>(e))
+            return;
+    }
+
+    reportError(RecursiveRestraintViolation{}, location);
 }
 
 bool ConstraintSolver::hasUnresolvedConstraints(TypeId ty)

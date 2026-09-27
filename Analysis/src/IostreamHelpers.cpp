@@ -238,6 +238,8 @@ static void errorToString(std::ostream& stream, const T& err)
         stream << "UninitializableClassField { classTy = " << toString(err.classTy) << ", key = '" << err.key << "' }";
     else if constexpr (std::is_same_v<T, UnusableClass>)
         stream << "UnusableClass { classTy = " << toString(err.classTy) << " }";
+    else if constexpr (std::is_same_v<T, ConstructorReadByName>)
+        stream << "ConstructorReadByName { table = " << toString(err.table) << ", className = " << err.className << " }";
     else if constexpr (std::is_same_v<T, UninstantiableClass>)
         stream << "UninstantiableClass { classTy = " << toString(err.classTy) << " }";
     else if constexpr (std::is_same_v<T, CheckedFunctionIncorrectArgs>)

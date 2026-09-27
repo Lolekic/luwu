@@ -58,6 +58,13 @@ struct GeneralizationConstraint
     /// If true, never introduce generics.  Always replace free types by their
     /// bounds or unknown. Presently used only to generalize the whole module.
     bool noGenerics = false;
+
+    // Luwu Classes (rfcs/classes.md): a generic class's instance method read through the class value
+    // (`Box.get`). Bound, once the method is generalized, to its type quantified over the class's
+    // own generics too, which the class value doesn't instantiate.
+    std::optional<TypeId> classValueMethodType;
+    std::vector<TypeId> classGenerics;
+    std::vector<TypePackId> classGenericPacks;
 };
 
 // variables ~ iterate iterator

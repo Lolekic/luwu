@@ -455,6 +455,10 @@ enum LuauOpcode
     // B: reserved
     // C: initial value of this member. currently must be a function.
     // AUX: The name of this member as a constant string
+    // Luwu Classes (rfcs/classes.md): B is 0, C holds a Luau function and AUX names a method of A's class shape
+    // (LBC_CONSTANT_CLASS_SHAPE). Besides the declared methods, the compiler registers the synthesized `__init`
+    // of a primary constructor and the `__defaults` closure for non-constant field defaults this way. Upstream
+    // encodes it the same; its class shapes differ (see LBC_CONSTANT_CLASS_SHAPE).
     LOP_NEWCLASSMEMBER,
 
     // CALLFB: call specified function with collecting runtime stats in a feedback slot
@@ -471,58 +475,67 @@ enum LuauOpcode
     LOP_CMPPROTO,
 
     // CHECKSELFCLASS: check that a register holds an object instance of a specific class, falling
-    // through when it does and raising when it does not; used for Luwu Classes 'self' validation in
-    // place of a class.isinstance() call. Raising here rather than through an inline `error(...)`
-    // call keeps the message out of the constant table and lets it name the receiver's *actual*
-    // class or type, which is only known at runtime.
-    // A: self register
-    // B: class register, or LBC_SELFCLASS_OWNER to take the class from the executing closure's
-    //    Proto::ownerclass instead (see LBC_SELFCLASS_OWNER)
-    // C: 1 if the call site used `:` syntax, 0 for `.` syntax; only affects the error message
+    // through when it does and raising when it does not. Luwu Classes (rfcs/classes.md) emit it where code
+    // after it relies on the value being an instance: a method's prologue (its own `self`), an O2 inline
+    // site of a method (the receiver), and after a fused `assert(class.isinstance(x, C))` whose `assert`
+    // returned. Raising here rather than through an inline `error(...)` call keeps the message out of
+    // the constant table and lets it name the value's *actual* class or type, which is only known at runtime.
+    // A: register holding the value to check
+    // B: register holding the class, or LBC_SELFCLASS_OWNER to take the class from the executing closure's
+    //    Proto::ownerclass instead (see LBC_SELFCLASS_OWNER). A register always holds a class (the VM asserts it).
+    // C: 1 at an inline site of a `:` call, 0 everywhere else; only affects the error message
     // AUX: string constant index of the method's name, for the error message
     LOP_CHECKSELFCLASS,
 
     // JUMPXISA: fused class.isinstance(value, class) test-and-branch (see rfcs/classes.md), emitted
-    // for `class.isinstance(x, C)` used as a condition. Avoids the builtin call and the boolean
-    // materialization.
+    // for `class.isinstance(x, C)` used as a condition and for `assert(class.isinstance(x, C))`. Avoids
+    // the builtin call and the boolean materialization. Like the builtin, it tests for an instance of
+    // exactly that class.
     // A: value register
     // D: jump offset
-    // AUX: class register in the low 8 bits; bit 31 is the polarity flag -- when set, jump if value
-    //      IS an instance of the class; when clear, jump if it is NOT (see LUAU_INSN_AUX_NOT);
-    //      bit 30 is LBC_JUMPXISA_CHECKCLASS -- when set, the class register is not known to hold a
-    //      class (e.g. a class imported from another module) and a non-class raises the builtin's
-    //      error; when clear, the compiler guarantees a class and the VM only asserts it
+    // AUX: class register in the low 8 bits; bits 8..29 are 0;
+    //      bit 31 is LBC_JUMPXISA_JUMPIFINSTANCE -- when set, jump if the value IS an instance of the class,
+    //      when clear, jump if it is NOT. This is the bit JUMPXEQK* call NOT (LUAU_INSN_AUX_NOT reads it) with
+    //      the opposite meaning: for JUMPXEQK* a set bit negates the comparison, here it asks for a match;
+    //      bit 30 is LBC_JUMPXISA_CHECKCLASS -- when set, the class register may hold any value (a class
+    //      from another module, or a class used where its declaration may not have run yet) and a non-class
+    //      raises the builtin's error; when clear, the register holds a class and the VM only asserts it
     LOP_JUMPXISA,
 
     // NEWOBJECT: allocate an instance of a class, initialized according to C (below).
-    // Emitted for a call whose callee is a statically resolved class (see isKnownClassExpr), in place
-    // of the `__call` metamethod dispatch and C constructor frame a generic CALL would go through.
+    // Emitted for a call whose callee is a class declared in this module and certainly assigned at that
+    // point, in place of the `__call` metamethod dispatch and C constructor frame a generic CALL would go
+    // through. Operands the VM asserts rather than checks: B holds a class, C agrees with that class
+    // (below), and the class has no `__defaults` closure unless C is LBC_NEWOBJECT_INIT.
     // A: destination register, which holds the instance afterwards
     // B: register holding the class
     // C: how the instance is initialized, and what AUX counts:
-    //   0 - default constructor; AUX is the argument count, and the table of field values, if AUX is
-    //       1, is in A + 1. The instance is complete afterwards.
-    //   1 - user-defined `__init`; AUX is its argument count. Only the call frame is prepared --
-    //       A + 1 gets `__init`, A + 2 gets the instance again as `self`, and the arguments are
-    //       already in A + 3 onwards -- and CALL A+1, AUX+2, 1 always follows, after which A holds
-    //       the instance.
-    //   2 - fields supplied positionally, so the instance is complete afterwards with no call at all:
-    //       AUX is the class's instance member count, and A + 1 onwards hold one value per member in
-    //       declaration order, with nil meaning "keep this member's default". Emitted for a primary
-    //       constructor's `ClassName(a, b)`, and for `ClassName { field = value }` when every key
-    //       names a declared field, so no argument table is built at all.
+    //   LBC_NEWOBJECT_DEFAULT - the class has no `__init`; AUX is the argument count (0 or 1), and the
+    //       table of field values, if AUX is 1, is in A + 1. The instance is complete afterwards.
+    //   LBC_NEWOBJECT_INIT - the class has a user-defined `__init` or a primary constructor; AUX is the
+    //       argument count. Only the call frame is prepared -- A + 1 gets `__init`, A + 2 gets the
+    //       instance again as `self`, and the arguments are already in A + 3 onwards -- and
+    //       CALL A+1, AUX+2, 1 always follows, after which A holds the instance.
+    //   LBC_NEWOBJECT_FIELDS - fields supplied positionally, so the instance is complete afterwards with no
+    //       call at all: AUX is the class's instance member count, and A + 1 onwards hold one value per
+    //       member in declaration order, with nil meaning "keep this member's default". Emitted for a
+    //       primary constructor's `ClassName(a, b)`, and for `ClassName { field = value }` on a class with
+    //       no `__init` when every key names a declared field, so no argument table is built at all.
     LOP_NEWOBJECT,
 
     // GETOBJECTMEMBER: read an instance member at a known offset, for a receiver whose class the
-    // compiler has *proven* with a runtime check and never reassigns:
+    // compiler has *proven* with a runtime check, and which nothing can reassign while the proof holds:
     //   - a method's own `self`, checked by the method's CHECKSELFCLASS prologue;
-    //   - an inlined method's `self`, checked by the CHECKSELFCLASS emitted at the inline site;
-    //   - a local in the then-branch of `if class.isinstance(local, C)` (JUMPXISA against a class declared
-    //     in this module).
+    //   - an inlined method's `self`, checked by the CHECKSELFCLASS emitted at the inline site, or, with no check
+    //     emitted, by a proof the receiver already has: this code constructed it (`local c = C()`), or it is
+    //     covered by `class.isinstance(c, C)` in an `if` or an `assert`;
+    //   - a local in the then-branch of `if class.isinstance(local, C)`, or in the statements after
+    //     `assert(class.isinstance(local, C))` in the same block (JUMPXISA against a class declared in
+    //     this module).
     // The member's offset is its index in declaration order, so none of GETTABLEKS's per-access work is
     // needed: no slot cache, no bounds check, no name compare and no private-access check. A private member
     // is only emitted this way through a proven `self` (whose body is the class's own code) or from inside
-    // one of the class's methods. The remaining checks only keep malformed bytecode memory-safe.
+    // one of the class's methods. That B holds an object with a member at AUX is asserted, not checked.
     // A: target register
     // B: register holding the object
     // AUX: member offset
@@ -572,8 +585,16 @@ enum LuauOpcode
 // Used in LOP_JUMPXEQK* instructions
 #define LUAU_INSN_AUX_NOT(aux) ((aux) >> 31)
 
-// Luwu Classes (rfcs/classes.md): JUMPXISA aux flag -- the class operand must be checked at runtime
+// Luwu Classes (rfcs/classes.md): JUMPXISA aux flags (see LOP_JUMPXISA)
+// Jump when the value is an instance of the class, rather than when it is not
+#define LBC_JUMPXISA_JUMPIFINSTANCE (1u << 31)
+// The class operand must be checked at runtime
 #define LBC_JUMPXISA_CHECKCLASS (1u << 30)
+
+// Luwu Classes (rfcs/classes.md): operand C of LOP_NEWOBJECT, how the instance is initialized (see LOP_NEWOBJECT)
+#define LBC_NEWOBJECT_DEFAULT 0
+#define LBC_NEWOBJECT_INIT 1
+#define LBC_NEWOBJECT_FIELDS 2
 
 // Auxilary 16-bit constant index and 16-bit cachedslot
 // Used in LOP_GETUDATAKS, LOP_SETUDATAKS and LOP_NAMECALLUDATA
@@ -648,10 +669,10 @@ enum LuwuBytecodeTag
 // instance positionally (LOP_NEWOBJECT's FIELDS form) instead of calling it: the VM checks this bit
 // before honoring that form on a class that has a custom `__init`.
 #define LBC_CLASSMEMBER_PRIMARYINIT (1 << 4)
-// Never serialized: the VM sets this on a class's `__init` when the class has any `const` field
-// (luaR_newclass). Reading such an `__init` as a member raises, since calling it on a constructed
-// object would reassign its `const` fields. Construction never reads `__init` by name, so it is
-// unaffected. Lives here so no compiler-emitted bit can collide with it.
+// Never serialized: the VM sets this on every class's `__init` when it builds the class. Reading `__init`
+// as a member raises, since calling it on a constructed object would re-run construction, which may
+// reassign its `const` fields. Construction never reads `__init` by name, so it is unaffected. Lives
+// here so no compiler-emitted bit can collide with it.
 #define LBC_CLASSMEMBER_INITBLOCKED (1 << 7)
 
 // Luwu Classes (rfcs/classes.md): operand B of LOP_CHECKSELFCLASS. Instead of naming a register

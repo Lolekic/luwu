@@ -346,6 +346,16 @@ public:
 
     void reportError(TypeErrorData&& data, const Location& location);
     void reportError(TypeError e);
+    // Luwu Classes (rfcs/classes.md): instantiating a generic class substitutes into its members while
+    // a pending expansion inside one can still be unexpanded, and the substitution copies it with new
+    // arguments that nothing else queues: an optional self-reference (`sw: S<U, T>?`), or a table's
+    // display arguments (`r: R<A<T>>` inside `class A<T>`, where `type R<T> = { R<T> }` never uses
+    // `T`). This queues their expansion. A member that is itself pending is deferred separately.
+    void queuePendingMemberExpansions(TypeId memberTy, NotNull<const Constraint> constraint);
+    // Luwu Classes (rfcs/classes.md): reports a generic class's infinite reference to itself once, at
+    // the reference inside the class.
+    TypeId quantifyOverClassGenerics(TypeId methodTy, const GeneralizationConstraint& c);
+    void reportInfiniteSelfReference(TypeId reference, TypeId classTemplate, const Location& expansionLocation);
 
     /**
      * Bind a type variable to another type.

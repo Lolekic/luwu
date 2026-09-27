@@ -4716,9 +4716,6 @@ TEST_CASE("ClassesInlining")
         {FFlag::DebugLuauUserDefinedClasses, true},
         {FFlag::DebugLuauUserDefinedClassesRuntime, true},
         {FFlag::LuwuBetterUserDefinedClasses, true},
-        // this file covers both receiver tiers, and the trusted one (a declared parameter, local or field
-        // type) only inlines when the compiler is allowed to act on annotations
-        {FFlag::DebugLuwuCompilerTrustsTypeAnnotations, true},
     };
 
     // Method inlining only runs at O2, and the conformance default is O1 -- at O1 every case in this
@@ -4726,7 +4723,25 @@ TEST_CASE("ClassesInlining")
     lua_CompileOptions copts = defaultOptions();
     copts.optimizationLevel = 2;
 
-    runConformance("classes_inlining.luau", nullptr, nullptr, nullptr, &copts);
+    // The trusted receiver tier (a declared parameter, local or field type) only inlines when the compiler may act
+    // on annotations, which is off by default: run the file both ways. It reads the setting from `trustsAnnotations`.
+    for (bool trust : {false, true})
+    {
+        CAPTURE(trust);
+        ScopedFastFlag trustFlag{FFlag::DebugLuwuCompilerTrustsTypeAnnotations, trust};
+
+        runConformance(
+            "classes_inlining.luau",
+            [](lua_State* L)
+            {
+                lua_pushboolean(L, FFlag::DebugLuwuCompilerTrustsTypeAnnotations);
+                lua_setglobal(L, "trustsAnnotations");
+            },
+            nullptr,
+            nullptr,
+            &copts
+        );
+    }
 }
 
 TEST_CASE("ClassesNativeCodegen")
@@ -4741,6 +4756,47 @@ TEST_CASE("ClassesNativeCodegen")
     // with any `@native` function natively compiles only those, so the rest of its protos stay interpreted
     // and can't exercise the lowering of the class opcodes. See tests/conformance/classes_ncg.luau.
     runConformance("classes_ncg.luau");
+}
+
+// Luwu Classes (rfcs/classes.md): regressions for review fixes, one file per area. Each runs at every
+// optimization level, since several of the bugs were specific to O2 inlining or to O0's lack of it.
+static void runClassesFixesConformance(const char* name)
+{
+    ScopedFastFlag sffs[] = {
+        {FFlag::DebugLuauUserDefinedClasses, true},
+        {FFlag::DebugLuauUserDefinedClassesRuntime, true},
+        {FFlag::LuwuBetterUserDefinedClasses, true},
+        {FFlag::LuwuDefaultArguments, true},
+        {FFlag::LuwuNonePrimitive, true},
+        {FFlag::LuwuGenericNominals, true},
+        // names the variable in const-binding errors ("Variable 'self' is constant ...")
+        {FFlag::LuauExportValueSyntax, true},
+    };
+
+    for (int level = 0; level <= 2; ++level)
+    {
+        CAPTURE(level);
+        lua_CompileOptions copts = defaultOptions();
+        copts.optimizationLevel = level;
+        runConformance(name, nullptr, nullptr, nullptr, &copts);
+    }
+}
+
+TEST_CASE("ClassesFixesVm")
+{
+    runClassesFixesConformance("classes_fixes_vm.luau");
+}
+
+TEST_CASE("ClassesFixesCompiler")
+{
+    runClassesFixesConformance("classes_fixes_compiler.luau");
+}
+
+// Kept apart from the other two files for the same reason as classes_ncg.luau: no `@native` functions, so the
+// --codegen run compiles every proto natively.
+TEST_CASE("ClassesFixesNativeCodegen")
+{
+    runClassesFixesConformance("classes_fixes_ncg.luau");
 }
 
 // Luwu Classes (rfcs/classes.md): the C API for classes, called the way an embedder calls it -- from C,
@@ -4820,6 +4876,7 @@ TEST_CASE("ClassesCApi")
 class Plain
     public x: number
     private y: number = 2
+    public tag: string = "plain"
 end
 
 class Frozen
@@ -5045,35 +5102,41 @@ Yielder_ = Yielder
         CHECK(lua_tonumber(L, -1) == 99);
     }
 
-    SUBCASE("reading a blocked __init from the embedder raises; an unblocked one does not")
+    SUBCASE("reading __init from the embedder raises, for every class")
     {
-        const char* blocked = "'__init' of 'Frozen' cannot be accessed or called explicitly because Frozen has const fields";
+        for (const char* global : {"Frozen_", "Plain_", "Hidden_"})
+        {
+            std::string className = std::string(global, strlen(global) - 1);
+            std::string blocked =
+                "'__init' of '" + className + "' cannot be accessed or called explicitly; construct a new object with " + className + "(...) instead";
 
-        std::string classErr = classesCApiProtected(
-            L,
-            [](lua_State* L)
-            {
-                lua_getglobal(L, "Frozen_");
-                lua_getfield(L, 1, "__init");
-            }
-        );
-        CHECK(classErr == blocked);
+            std::string classErr = classesCApiProtected(
+                L,
+                [global](lua_State* L)
+                {
+                    lua_getglobal(L, global);
+                    lua_getfield(L, 1, "__init");
+                }
+            );
+            CHECK(classErr == blocked);
 
-        std::string objectErr = classesCApiProtected(
-            L,
-            [](lua_State* L)
-            {
-                lua_getglobal(L, "Frozen_");
-                lua_pushnumber(L, 1);
-                lua_pushliteral(L, "a");
-                lua_newobject(L, 1);
-                lua_getfield(L, 1, "__init");
-            }
-        );
-        CHECK(objectErr == blocked);
-
-        lua_getglobal(L, "Plain_");
-        CHECK(lua_getfield(L, 1, "__init") == LUA_TFUNCTION);
+            std::string objectErr = classesCApiProtected(
+                L,
+                [global](lua_State* L)
+                {
+                    lua_getglobal(L, global);
+                    // Plain takes the POD constructor's single table of fields
+                    if (strcmp(global, "Plain_") != 0)
+                    {
+                        lua_pushnumber(L, 1);
+                        lua_pushliteral(L, "a");
+                    }
+                    lua_newobject(L, 1);
+                    lua_getfield(L, 1, "__init");
+                }
+            );
+            CHECK(objectErr == blocked);
+        }
     }
 
     SUBCASE("metatables of classes and objects are never exposed or replaced")
@@ -5209,18 +5272,263 @@ Yielder_ = Yielder
         CHECK(lua_getclassname(L, 10) == nullptr); // an unused stack slot
         CHECK(lua_gettop(L) == 3);
     }
+
+    SUBCASE("lua_newobject on a POD class reads an object argument's private fields as the embedder")
+    {
+        lua_getglobal(L, "Plain_");
+        lua_newobject(L, 1);
+        lua_pushnumber(L, 7);
+        lua_setfield(L, 1, "y");
+
+        lua_getglobal(L, "Plain_");
+        lua_pushvalue(L, 1);
+        lua_newobject(L, 2);
+        lua_getfield(L, 2, "y");
+        CHECK(lua_tonumber(L, -1) == 7);
+        lua_settop(L, 0);
+
+        lua_getglobal(L, "Plain_");
+        lua_pushnil(L);
+        lua_newobject(L, 1);
+        lua_getfield(L, 1, "y");
+        CHECK(lua_tonumber(L, -1) == 2);
+    }
+
+    SUBCASE("heap enumeration counts inline members and reports class edges")
+    {
+        // internal function, declared in lgc.h - not exposed via lua.h
+        extern void luaC_enumheap(
+            lua_State * L,
+            void* context,
+            void (*node)(void* context, void* ptr, uint8_t tt, uint8_t memcat, size_t size, const char* name),
+            void (*edge)(void* context, void* from, void* to, const char* name)
+        );
+
+        lua_getglobal(L, "Frozen_");
+        lua_pushnumber(L, 1);
+        lua_pushliteral(L, "a");
+        lua_newobject(L, 1);
+
+        struct HeapContext
+        {
+            size_t frozenObjectSize = 0;
+            bool ownerclass = false;
+            bool memberdefaults = false;
+            bool instancemetatable = false;
+        } ctx;
+
+        luaC_enumheap(
+            L,
+            &ctx,
+            [](void* ctx, void* gco, uint8_t tt, uint8_t memcat, size_t size, const char* name)
+            {
+                if (tt == LUA_TOBJECT && name && strcmp(name, "object Frozen") == 0)
+                    static_cast<HeapContext*>(ctx)->frozenObjectSize = size;
+            },
+            [](void* ctx, void* from, void* to, const char* name)
+            {
+                HeapContext& context = *static_cast<HeapContext*>(ctx);
+                std::string_view sv{name ? name : ""};
+                context.ownerclass |= sv == "ownerclass";
+                context.memberdefaults |= sv == "memberdefaults";
+                context.instancemetatable |= sv == "instancemetatable";
+            }
+        );
+
+        // Frozen has three fields, each a TValue stored inline after the object header
+        CHECK(ctx.frozenObjectSize >= 3 * 16);
+        CHECK(ctx.ownerclass);
+        CHECK(ctx.memberdefaults);    // Plain's constant default for `tag`
+        CHECK(ctx.instancemetatable); // Frozen's `__add`
+    }
+
+    SUBCASE("loading classes survives an allocation failure at any point, and leaks nothing")
+    {
+        // internal functions, declared in lgc.h - not exposed via lua.h
+        extern void luaC_validate(lua_State * L);
+        extern void luaC_enumheap(
+            lua_State * L,
+            void* context,
+            void (*node)(void* context, void* ptr, uint8_t tt, uint8_t memcat, size_t size, const char* name),
+            void (*edge)(void* context, void* from, void* to, const char* name)
+        );
+
+        struct Budget
+        {
+            size_t live = 0;
+            long remaining = -1; // negative: unlimited
+        };
+
+        lua_Alloc alloc = [](void* ud, void* ptr, size_t osize, size_t nsize) -> void*
+        {
+            Budget* budget = static_cast<Budget*>(ud);
+
+            if (nsize == 0)
+            {
+                free(ptr);
+                budget->live -= osize;
+                return nullptr;
+            }
+
+            if (budget->remaining == 0)
+                return nullptr;
+            if (budget->remaining > 0)
+                budget->remaining--;
+
+            void* result = realloc(ptr, nsize);
+            if (result)
+                budget->live += nsize - osize;
+            return result;
+        };
+
+        // Allocations over 1KB bypass the VM's page allocator and reach `alloc` one by one, so a long class
+        // name and many defaulted fields put a failure point at each of the class's own buffers.
+        std::string oomSource = std::string(source) + "class " + std::string(1100, 'W') + "\n";
+        for (int i = 0; i < 140; i++)
+            oomSource += "    public f" + std::to_string(i) + ": string = \"d" + std::to_string(i) + "\"\n";
+        oomSource += "    public function get(self) return self.f0 end\n    public function __tostring(self) return self.f1 end\nend\n";
+
+        size_t oomBytecodeSize = 0;
+        char* oomBytecode = luau_compile(oomSource.data(), oomSource.size(), nullptr, &oomBytecodeSize);
+
+#ifdef _WIN32
+        FILE* devNull = fopen("NUL", "w");
+#else
+        FILE* devNull = fopen("/dev/null", "w");
+#endif
+        REQUIRE(devNull);
+
+        bool loaded = false;
+        for (long allowed = 0; !loaded && allowed < 100000; allowed++)
+        {
+            Budget budget;
+            lua_State* OL = lua_newstate(alloc, &budget);
+            REQUIRE(OL);
+
+            budget.remaining = allowed;
+            int status = luau_load(OL, "=ClassesCApiOom", oomBytecode, oomBytecodeSize, 0);
+            budget.remaining = -1;
+            loaded = status == 0;
+
+            // A class the failure left half-built is still in the heap, and the heap walks visit it.
+            luaC_validate(OL);
+            lua_memorydump(OL, devNull, nullptr);
+            luaC_enumheap(
+                OL, nullptr, [](void*, void*, uint8_t, uint8_t, size_t, const char*) {}, [](void*, void*, void*, const char*) {}
+            );
+
+            lua_close(OL);
+            CHECK(budget.live == 0);
+        }
+
+        fclose(devNull);
+        free(oomBytecode);
+        CHECK(loaded);
+    }
+
+    SUBCASE("the constructor's debug name outlives its class")
+    {
+        // Freed blocks are scribbled over and kept until the state closes, so a name read out of memory
+        // the class freed comes back as garbage instead of whatever the allocator left there. The name
+        // is over 1KB, which the VM's page allocator hands to `alloc` directly.
+        struct Quarantine
+        {
+            std::vector<void*> freed;
+        };
+
+        lua_Alloc alloc = [](void* ud, void* ptr, size_t osize, size_t nsize) -> void*
+        {
+            Quarantine* quarantine = static_cast<Quarantine*>(ud);
+
+            if (nsize == 0)
+            {
+                if (ptr)
+                {
+                    memset(ptr, 0xab, osize);
+                    quarantine->freed.push_back(ptr);
+                }
+                return nullptr;
+            }
+
+            void* result = malloc(nsize);
+            if (result && ptr)
+            {
+                memcpy(result, ptr, osize < nsize ? osize : nsize);
+                memset(ptr, 0xab, osize);
+                quarantine->freed.push_back(ptr);
+            }
+            return result;
+        };
+
+        Quarantine quarantine;
+        lua_State* QL = lua_newstate(alloc, &quarantine);
+        REQUIRE(QL);
+        luaL_openlibs(QL);
+
+        std::string className(1100, 'N');
+        std::string classSource = "class " + className +
+                                  "\n"
+                                  "    x: number\n"
+                                  "    function __init(self)\n"
+                                  "        self.x = 1\n"
+                                  "        LEAKED_CTOR = debug.info(2, 'f')\n"
+                                  "    end\n"
+                                  "end\n"
+                                  "WEAK = setmetatable({}, { __mode = 'k' })\n"
+                                  "WEAK[" +
+                                  className + "] = true\n" + "pcall(" + className + ")\n";
+        const char* checkSource = "assert(next(WEAK) == nil, 'the class was not collected')\nreturn debug.info(LEAKED_CTOR, 'n')\n";
+
+        auto load = [&](const char* chunk)
+        {
+            size_t size = 0;
+            char* bytecode = luau_compile(chunk, strlen(chunk), nullptr, &size);
+            REQUIRE(luau_load(QL, "=ClassesCApiDebugName", bytecode, size, 0) == 0);
+            free(bytecode);
+        };
+
+        load(classSource.c_str());
+        REQUIRE(lua_pcall(QL, 0, 0, 0) == LUA_OK);
+        lua_gc(QL, LUA_GCCOLLECT, 0);
+        lua_gc(QL, LUA_GCCOLLECT, 0);
+
+        load(checkSource);
+        REQUIRE(lua_pcall(QL, 0, 1, 0) == LUA_OK);
+        REQUIRE(lua_isstring(QL, -1));
+        CHECK(std::string(lua_tostring(QL, -1)) == className + "() constructor");
+
+        lua_close(QL);
+        for (void* block : quarantine.freed)
+            free(block);
+    }
 }
 
 // Luwu Classes (rfcs/classes.md): differential and crash fuzzing of classes. tests/classes_fuzz/run.luau generates random
 // class programs and runs each through the luau CLI at every optimization level, interpreted and natively compiled,
-// comparing results against -O0 and reporting any crash, assert or divergence. It is a seal script, so this case is
-// skipped unless seal 0.8.x at >= 0.8.1 is available (ChildProcess:status arrived in 0.8.1; 0.9.0 breaks the APIs it uses) -- set LUWU_SEAL to point at a binary that
-// isn't on PATH (PATH lookup finds seal.exe on Windows). LUWU_CLASSES_FUZZ_COUNT and LUWU_CLASSES_FUZZ_START pick the seeds (default 300 programs from 1).
-// Run from an assert-enabled build: the fuzzer uses the luau CLI built alongside this binary.
+// comparing results against -O0 and reporting any crash, assert or divergence. It is a seal script and needs seal 0.8.x
+// at >= 0.8.1 (ChildProcess:status arrived in 0.8.1; 0.9.0 breaks the std APIs it uses): found on PATH (seal.exe on
+// Windows), or at LUWU_SEAL. Without it the case fails; set LUWU_SKIP_CLASSES_FUZZ=1 to skip it on purpose.
+// LUWU_CLASSES_FUZZ_COUNT and LUWU_CLASSES_FUZZ_START pick the seeds (default 300 programs from 1).
+// The fuzzer covers every -O level and codegen mode itself, so it runs once per binary configuration that doesn't
+// set -O or --codegen, instead of again under each of those. Run from an assert-enabled build: it uses the luau CLI
+// built alongside this binary.
 TEST_CASE("ClassesFuzz")
 {
+    const char* skipEnv = std::getenv("LUWU_SKIP_CLASSES_FUZZ");
+    if (skipEnv && *skipEnv && strcmp(skipEnv, "0") != 0)
+    {
+        MESSAGE("skipped: LUWU_SKIP_CLASSES_FUZZ is set");
+        return;
+    }
+
+    if (codegen || optimizationLevel != 1)
+    {
+        MESSAGE("skipped: the classes fuzzer runs its own -O levels and codegen modes, so it only runs without -O and --codegen");
+        return;
+    }
+
 #if !defined(LUWU_CLASSES_FUZZ_DIR) || !defined(LUWU_REPL_CLI_PATH)
-    MESSAGE("skipped: classes fuzzer isn't configured for this build");
+    FAIL("the classes fuzzer isn't configured for this build (LUWU_CLASSES_FUZZ_DIR, LUWU_REPL_CLI_PATH); set LUWU_SKIP_CLASSES_FUZZ=1 to skip it");
 #else
 #ifdef _WIN32
     const char* nullDevice = "NUL";
@@ -5258,20 +5566,14 @@ TEST_CASE("ClassesFuzz")
     std::string cli = LUWU_REPL_CLI_PATH;
     struct stat st;
     if (stat(cli.c_str(), &st) != 0)
-    {
-        MESSAGE("skipped: luau CLI not found at " << cli);
-        return;
-    }
+        FAIL("luau CLI not found at " << cli << "; build it (the Makefile's luau-tests and CMake's Luau.Conformance already do)");
 
     const char* sealEnv = std::getenv("LUWU_SEAL");
     std::string seal = sealEnv && *sealEnv ? sealEnv : "seal";
 
     std::string versionOutput;
     if (runCommand("\"" + seal + "\" --version 2>" + nullDevice, versionOutput) != 0)
-    {
-        MESSAGE("skipped: seal not found (install seal 0.8.x, >= 0.8.1, or set LUWU_SEAL)");
-        return;
-    }
+        FAIL("seal not found: install seal 0.8.x at >= 0.8.1 or point LUWU_SEAL at it, or set LUWU_SKIP_CLASSES_FUZZ=1 to skip the classes fuzzer");
 
     while (!versionOutput.empty() && isspace((unsigned char)versionOutput.back()))
         versionOutput.pop_back();
@@ -5280,10 +5582,8 @@ TEST_CASE("ClassesFuzz")
     // run.luau targets seal 0.8.x: 0.8.1 added ChildProcess:status, and 0.9.0 makes breaking changes to the std APIs it uses
     if (sscanf(versionOutput.c_str(), "%d.%d.%d", &major, &minor, &patch) != 3 || std::make_tuple(major, minor, patch) < std::make_tuple(0, 8, 1) ||
         std::make_tuple(major, minor, patch) >= std::make_tuple(0, 9, 0))
-    {
-        MESSAGE("skipped: seal " << versionOutput << " isn't supported, the classes fuzzer needs seal 0.8.x at >= 0.8.1");
-        return;
-    }
+        FAIL("seal " << versionOutput << " isn't supported: the classes fuzzer needs seal 0.8.x at >= 0.8.1 (point LUWU_SEAL at one, or set "
+                                         "LUWU_SKIP_CLASSES_FUZZ=1 to skip it)");
 
     const char* countEnv = std::getenv("LUWU_CLASSES_FUZZ_COUNT");
     const char* startEnv = std::getenv("LUWU_CLASSES_FUZZ_START");
@@ -6109,7 +6409,9 @@ TEST_CASE("LegacyBytecodeLoadsWithMluauAdditions")
     CHECK(contains(bcb.dumpEverything(), "FASTCALL1 " + std::to_string(LBF_BUFFER_ISFROZEN) + " "));
     CHECK(getLoadError(asLegacyBytecode(bcb.getBytecode())) == "");
 
-    // the same function typed with a Luwu-only tag is refused, so the parameter's tag really is in the blob
+    // the same function typed with a Luwu-only tag is refused, so the parameter's tag really is in the blob (`object`
+    // only names the object type when classes are on)
+    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
     std::string object = asLegacyBytecode(Luau::compile("local function f(x: object, b: buffer) return buffer.isfrozen(b) end return f", options));
     CHECK(contains(getLoadError(object), "uses type tag " + std::to_string(LBC_TYPE_OBJECT)));
 }
@@ -6157,6 +6459,169 @@ TEST_CASE("UpstreamOnlyBytecodeVersionsAreNamed")
 
     bytecode[0] = char(2);
     CHECK(contains(getLoadError(bytecode), "bytecode version mismatch (expected [3..12] or Luwu bytecode, got 2)"));
+}
+
+TEST_CASE("ClassesNativeMemberSlotCacheSkipsWideOffsets")
+{
+    // Luwu Classes (rfcs/classes.md): the member slot cache is GETTABLEKS's 8-bit operand C. The native
+    // fallback patches it for a member at offset 44, and leaves it alone for offset 300, which would
+    // truncate to 44 and cache some other member.
+    if (!luau_codegen_supported())
+        return;
+
+    ScopedFastFlag sffs[] = {
+        {FFlag::DebugLuauUserDefinedClasses, true},
+        {FFlag::DebugLuauUserDefinedClassesRuntime, true},
+        {FFlag::LuwuBetterUserDefinedClasses, true},
+    };
+
+    constexpr int kMembers = 301; // f0 .. f300, each at the offset in its name
+
+    std::string source = "class Wide\n";
+    for (int i = 0; i < kMembers; i++)
+        source += "    public f" + std::to_string(i) + ": number = " + std::to_string(i) + "\n";
+    source += "end\n\n";
+    // `o` is untyped, so each read takes the table guard's miss into the object path and its fallback
+    source += "function near(o) return o.f44 end\n";
+    source += "function far(o) return o.f300 end\n";
+    source += "wide = Wide()\n";
+
+    StateRef globalState(luaL_newstate(), lua_close);
+    lua_State* L = globalState.get();
+    luaL_openlibs(L);
+    luau_codegen_create(L);
+
+    lua_CompileOptions compileOptions = {};
+    compileOptions.optimizationLevel = 2;
+    size_t bytecodeSize = 0;
+    char* bytecode = luau_compile(source.data(), source.size(), &compileOptions, &bytecodeSize);
+    int loadResult = luau_load(L, "=ClassesNativeMemberSlotCacheSkipsWideOffsets", bytecode, bytecodeSize, 0);
+    free(bytecode);
+    REQUIRE(loadResult == 0);
+
+    Luau::CodeGen::CompilationResult nativeResult = Luau::CodeGen::compile(L, -1, defaultCodegenOptions());
+    REQUIRE(nativeResult.result == Luau::CodeGen::CodeGenCompilationResult::Success);
+    REQUIRE(lua_pcall(L, 0, 0, 0) == LUA_OK);
+
+    auto getTableKsSlot = [](const Proto* proto) -> Instruction*
+    {
+        for (int pc = 0; pc < proto->sizecode; pc++)
+        {
+            if (LUAU_INSN_OP(proto->code[pc]) == LOP_GETTABLEKS)
+                return &proto->code[pc];
+        }
+        return nullptr;
+    };
+
+    auto run = [&](const char* fn, double expected) -> Instruction*
+    {
+        lua_getglobal(L, fn);
+        Proto* proto = static_cast<const Closure*>(lua_topointer(L, -1))->l.p;
+        REQUIRE(proto->execdata != nullptr);
+
+        Instruction* insn = getTableKsSlot(proto);
+        REQUIRE(insn != nullptr);
+
+        lua_getglobal(L, "wide");
+        REQUIRE(lua_pcall(L, 1, 1, 0) == LUA_OK);
+        CHECK(lua_tonumber(L, -1) == expected);
+        lua_pop(L, 1);
+        return insn;
+    };
+
+    lua_getglobal(L, "far");
+    Instruction* farInsn = getTableKsSlot(static_cast<const Closure*>(lua_topointer(L, -1))->l.p);
+    lua_pop(L, 1);
+    REQUIRE(farInsn != nullptr);
+    uint8_t farHint = LUAU_INSN_C(*farInsn);
+    // the compiler's hint must not already be the truncated offset, or the test could not tell
+    REQUIRE(farHint != uint8_t(300));
+
+    Instruction* nearInsn = run("near", 44);
+    CHECK(LUAU_INSN_C(*nearInsn) == 44);
+
+    run("far", 300);
+    CHECK(LUAU_INSN_C(*farInsn) == farHint);
+}
+
+TEST_CASE("ClassesInterpreterMemberSlotCacheSkipsWideOffsets")
+{
+    // Luwu Classes (rfcs/classes.md): the interpreter's side of ClassesNativeMemberSlotCacheSkipsWideOffsets.
+    // GETTABLEKS and NAMECALL cache a member at offset 44 in operand C, and leave it alone for offsets 300
+    // and 301, which would truncate and cache some other member.
+    ScopedFastFlag sffs[] = {
+        {FFlag::DebugLuauUserDefinedClasses, true},
+        {FFlag::DebugLuauUserDefinedClassesRuntime, true},
+        {FFlag::LuwuBetterUserDefinedClasses, true},
+    };
+
+    constexpr int kMembers = 301; // f0 .. f300, each at the offset in its name; method `m` is at 301
+
+    std::string source = "class Wide\n";
+    for (int i = 0; i < kMembers; i++)
+        source += "    public f" + std::to_string(i) + ": number = " + std::to_string(i) + "\n";
+    source += "    public function m(self) return 301 end\n";
+    source += "end\n\n";
+    source += "function near(o) return o.f44 end\n";
+    source += "function far(o) return o.f300 end\n";
+    source += "function farcall(o) return o:m() end\n";
+    source += "wide = Wide()\n";
+
+    StateRef globalState(luaL_newstate(), lua_close);
+    lua_State* L = globalState.get();
+    luaL_openlibs(L);
+
+    lua_CompileOptions compileOptions = {};
+    compileOptions.optimizationLevel = 1;
+    size_t bytecodeSize = 0;
+    char* bytecode = luau_compile(source.data(), source.size(), &compileOptions, &bytecodeSize);
+    int loadResult = luau_load(L, "=ClassesInterpreterMemberSlotCacheSkipsWideOffsets", bytecode, bytecodeSize, 0);
+    free(bytecode);
+    REQUIRE(loadResult == 0);
+    REQUIRE(lua_pcall(L, 0, 0, 0) == LUA_OK);
+
+    auto findInsn = [&](const char* fn, LuauOpcode op) -> Instruction*
+    {
+        lua_getglobal(L, fn);
+        Proto* proto = static_cast<const Closure*>(lua_topointer(L, -1))->l.p;
+        lua_pop(L, 1);
+        for (int pc = 0; pc < proto->sizecode; pc++)
+        {
+            if (LUAU_INSN_OP(proto->code[pc]) == op)
+                return &proto->code[pc];
+        }
+        return nullptr;
+    };
+
+    auto run = [&](const char* fn, double expected)
+    {
+        lua_getglobal(L, fn);
+        lua_getglobal(L, "wide");
+        REQUIRE(lua_pcall(L, 1, 1, 0) == LUA_OK);
+        CHECK(lua_tonumber(L, -1) == expected);
+        lua_pop(L, 1);
+    };
+
+    Instruction* nearInsn = findInsn("near", LOP_GETTABLEKS);
+    Instruction* farInsn = findInsn("far", LOP_GETTABLEKS);
+    Instruction* farCallInsn = findInsn("farcall", LOP_NAMECALL);
+    REQUIRE(nearInsn);
+    REQUIRE(farInsn);
+    REQUIRE(farCallInsn);
+    uint8_t farHint = LUAU_INSN_C(*farInsn);
+    uint8_t farCallHint = LUAU_INSN_C(*farCallInsn);
+    // the compiler's hints must not already be the truncated offsets, or the test could not tell
+    REQUIRE(farHint != uint8_t(300));
+    REQUIRE(farCallHint != uint8_t(301));
+
+    run("near", 44);
+    CHECK(LUAU_INSN_C(*nearInsn) == 44);
+
+    run("far", 300);
+    CHECK(LUAU_INSN_C(*farInsn) == farHint);
+
+    run("farcall", 301);
+    CHECK(LUAU_INSN_C(*farCallInsn) == farCallHint);
 }
 
 TEST_SUITE_END();

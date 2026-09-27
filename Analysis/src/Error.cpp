@@ -135,6 +135,16 @@ static std::optional<std::string> nominalDisplayName(TypeId t)
     return "class<" + etv->name + ">";
 }
 
+static bool isClassValueAgainstItsObject(TypeId given, TypeId wanted)
+{
+    const ExternType* givenEtv = get<ExternType>(follow(given));
+    const ExternType* wantedEtv = get<ExternType>(follow(wanted));
+    if (!givenEtv || !wantedEtv || givenEtv->name != wantedEtv->name)
+        return false;
+
+    return nominalDisplayName(given).has_value() != nominalDisplayName(wanted).has_value();
+}
+
 struct ErrorConverter
 {
     FileResolver* fileResolver = nullptr;
@@ -192,39 +202,36 @@ struct ErrorConverter
         // long-standing "Expected this to be 'X' from 'a.luau', but got 'X' from 'a.luau'". Try each
         // distinguishing fact in turn and, if none of them separates the two, say nothing extra
         // rather than repeating the same qualifier twice.
-        if (givenTypeName == wantedTypeName)
+        // A class value against one of its own objects: re-spell the class side as `class<X>`. The
+        // strings can differ too, since an object of a generic class prints its type arguments
+        // (`Box<number>`) and the class value doesn't.
+        if (isClassValueAgainstItsObject(tm.givenType, tm.wantedType))
         {
-            // A class value against one of its own objects: re-spell the class side as `class<X>`.
             std::optional<std::string> givenDisplay = nominalDisplayName(tm.givenType);
             std::optional<std::string> wantedDisplay = nominalDisplayName(tm.wantedType);
+            result =
+                constructErrorMessage(givenDisplay.value_or(givenTypeName), wantedDisplay.value_or(wantedTypeName), std::nullopt, std::nullopt);
+        }
 
-            if (givenDisplay.has_value() != wantedDisplay.has_value())
+        if (result.empty() && givenTypeName == wantedTypeName)
+        {
+            if (auto givenDefinitionModule = getDefinitionModuleName(tm.givenType))
             {
-                result = constructErrorMessage(
-                    givenDisplay.value_or(givenTypeName), wantedDisplay.value_or(wantedTypeName), std::nullopt, std::nullopt
-                );
-            }
-
-            if (result.empty())
-            {
-                if (auto givenDefinitionModule = getDefinitionModuleName(tm.givenType))
+                if (auto wantedDefinitionModule = getDefinitionModuleName(tm.wantedType))
                 {
-                    if (auto wantedDefinitionModule = getDefinitionModuleName(tm.wantedType))
+                    std::string givenModuleName = *givenDefinitionModule;
+                    std::string wantedModuleName = *wantedDefinitionModule;
+
+                    if (fileResolver != nullptr)
                     {
-                        std::string givenModuleName = *givenDefinitionModule;
-                        std::string wantedModuleName = *wantedDefinitionModule;
-
-                        if (fileResolver != nullptr)
-                        {
-                            givenModuleName = fileResolver->getHumanReadableModuleName(*givenDefinitionModule);
-                            wantedModuleName = fileResolver->getHumanReadableModuleName(*wantedDefinitionModule);
-                        }
-
-                        if (givenModuleName != wantedModuleName)
-                            result = constructErrorMessage(
-                                givenTypeName, wantedTypeName, " from " + quote(givenModuleName), " from " + quote(wantedModuleName)
-                            );
+                        givenModuleName = fileResolver->getHumanReadableModuleName(*givenDefinitionModule);
+                        wantedModuleName = fileResolver->getHumanReadableModuleName(*wantedDefinitionModule);
                     }
+
+                    if (givenModuleName != wantedModuleName)
+                        result = constructErrorMessage(
+                            givenTypeName, wantedTypeName, " from " + quote(givenModuleName), " from " + quote(wantedModuleName)
+                        );
                 }
             }
         }
@@ -964,6 +971,12 @@ struct ErrorConverter
                "an instance of this class from a `public function` instead? Call the constructor to silence";
     }
 
+    std::string operator()(const ConstructorReadByName& e) const
+    {
+        return "Cannot read '__init' of class '" + e.className + "'; constructing the class with '" + e.className +
+               "(...)' is the only way to run it, and reading it here will raise a runtime error";
+    }
+
     std::string operator()(const PrivateConstructorAccess& e) const
     {
         return "This class's constructor is private; call a factory function instead of calling the constructor directly";
@@ -1290,6 +1303,11 @@ bool UnusableClass::operator==(const UnusableClass& rhs) const
 bool UninstantiableClass::operator==(const UninstantiableClass& rhs) const
 {
     return classTy == rhs.classTy;
+}
+
+bool ConstructorReadByName::operator==(const ConstructorReadByName& rhs) const
+{
+    return *table == *rhs.table && className == rhs.className;
 }
 
 bool PrivateConstructorAccess::operator==(const PrivateConstructorAccess& rhs) const
@@ -1846,6 +1864,8 @@ void copyError(T& e, TypeArena& destArena, CloneState& cloneState)
         e.table = clone(e.table);
     else if constexpr (std::is_same_v<T, PrivateConstructorAccess>)
         e.classTy = clone(e.classTy);
+    else if constexpr (std::is_same_v<T, ConstructorReadByName>)
+        e.table = clone(e.table);
     else if constexpr (std::is_same_v<T, UninitializableClassField>)
         e.classTy = clone(e.classTy);
     else if constexpr (std::is_same_v<T, UnusableClass>)

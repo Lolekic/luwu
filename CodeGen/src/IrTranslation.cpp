@@ -1884,16 +1884,13 @@ void translateInstGetTableKS(IrBuilder& build, const Instruction* pc, int pcpos)
 }
 
 // Luwu Classes (rfcs/classes.md): read a member at a constant offset on a receiver whose class the
-// compiler proved. The tag guard only keeps malformed bytecode from dereferencing a non-object; nothing
-// about the class is re-derived.
+// compiler proved. Nothing is checked: the receiver is an object of that class in valid bytecode (see
+// VM_CASE(LOP_GETOBJECTMEMBER), which asserts it).
 void translateInstGetObjectMember(IrBuilder& build, const Instruction* pc, int pcpos)
 {
     int ra = LUAU_INSN_A(*pc);
     int rb = LUAU_INSN_B(*pc);
     uint32_t offset = pc[1];
-
-    IrOp tb = build.inst(IrCmd::LOAD_TAG, build.vmReg(rb));
-    build.inst(IrCmd::CHECK_TAG, tb, build.constTag(LUA_TOBJECT), build.vmExit(pcpos));
 
     IrOp vb = build.inst(IrCmd::LOAD_POINTER, build.vmReg(rb));
     IrOp addr = build.inst(IrCmd::OBJECT_MEMBER_ADDR, vb, build.constUint(offset));
@@ -1902,13 +1899,14 @@ void translateInstGetObjectMember(IrBuilder& build, const Instruction* pc, int p
 }
 
 // Luwu Classes (rfcs/classes.md): construction. The FIELDS form (a primary constructor, or a POD class
-// constructed with every field) is lowered natively when the class passes the same shape rules the
-// interpreter checks: allocate uninitialized, then copy each argument register into its member. The copies
-// are ordinary IR stores, so const prop can forward a value that is still unboxed (the `self.x + o.x`
-// computed just before) straight into the member. Every other case -- the INIT form, the table form, a
-// class with defaults, a private constructor used from outside its class, or a value that isn't a class
-// -- runs executeNEWOBJECT as a fallback, as all construction used to. Nothing can collect between the
-// allocation and the last store, and a freshly allocated object is white, so no barrier is needed.
+// constructed with every field) is lowered natively: allocate uninitialized, then copy each argument
+// register into its member. The copies are ordinary IR stores, so const prop can forward a value that is
+// still unboxed (the `self.x + o.x` computed just before) straight into the member. B holds a class of the
+// shape the compiler picked in valid bytecode (VM_CASE(LOP_NEWOBJECT) asserts it), so only the runtime
+// conditions are guarded. Every other case -- the INIT form, the table form, a class with constant
+// defaults, a private constructor used from outside its class -- runs executeNEWOBJECT as a fallback.
+// Nothing can collect between the allocation and the last store, and a freshly allocated object is white,
+// so no barrier is needed.
 void translateInstNewObject(IrBuilder& build, const Instruction* pc, int pcpos)
 {
     int ra = LUAU_INSN_A(*pc);
@@ -1921,7 +1919,7 @@ void translateInstNewObject(IrBuilder& build, const Instruction* pc, int pcpos)
         build.inst(IrCmd::FALLBACK_NEWOBJECT, build.constUint(pcpos), build.vmReg(ra), build.vmReg(rb), build.constInt(form), build.constInt(int(aux)));
     };
 
-    if (form != 2)
+    if (form != LBC_NEWOBJECT_FIELDS)
     {
         emitFallback();
         return;
@@ -1930,9 +1928,8 @@ void translateInstNewObject(IrBuilder& build, const Instruction* pc, int pcpos)
     IrOp fallback = build.fallbackBlock(pcpos);
     IrOp next = build.blockAtInst(pcpos + getOpLength(LuauOpcode(LOP_NEWOBJECT)));
 
-    build.loadAndCheckTag(build.vmReg(rb), LUA_TCLASS, fallback);
     IrOp classPtr = build.inst(IrCmd::LOAD_POINTER, build.vmReg(rb));
-    build.inst(IrCmd::CHECK_CLASS_FIELDS_CONSTRUCTIBLE, classPtr, build.constUint(aux), fallback);
+    build.inst(IrCmd::CHECK_CLASS_FIELDS_CONSTRUCTIBLE, classPtr, fallback);
 
     build.inst(IrCmd::SET_SAVEDPC, build.constUint(pcpos + getOpLength(LuauOpcode(LOP_NEWOBJECT))));
     IrOp object = build.inst(IrCmd::NEW_OBJECT, classPtr);
@@ -1960,9 +1957,6 @@ void translateInstSetObjectMember(IrBuilder& build, const Instruction* pc, int p
     int ra = LUAU_INSN_A(*pc);
     int rb = LUAU_INSN_B(*pc);
     uint32_t offset = pc[1];
-
-    IrOp tb = build.inst(IrCmd::LOAD_TAG, build.vmReg(rb));
-    build.inst(IrCmd::CHECK_TAG, tb, build.constTag(LUA_TOBJECT), build.vmExit(pcpos));
 
     IrOp vb = build.inst(IrCmd::LOAD_POINTER, build.vmReg(rb));
     IrOp addr = build.inst(IrCmd::OBJECT_MEMBER_ADDR, vb, build.constUint(offset));
@@ -2417,7 +2411,7 @@ void translateInstJumpXIsa(IrBuilder& build, const Instruction* pc, int pcpos)
     int ra = LUAU_INSN_A(*pc);
     uint32_t aux = pc[1];
     int classReg = aux & 0xff;
-    bool jumpIfInstance = (aux >> 31) != 0;
+    bool jumpIfInstance = (aux & LBC_JUMPXISA_JUMPIFINSTANCE) != 0;
 
     IrOp target = build.blockAtInst(pcpos + 1 + LUAU_INSN_D(*pc));
     IrOp next = build.blockAtInst(pcpos + 2);

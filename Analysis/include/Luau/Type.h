@@ -594,7 +594,7 @@ using NominalRelation = Variant<Obj, Klass>;
  * The properties of a class are always exactly known.
  * Extern types optionally have a parent type.
  * Two different extern types that share the same properties are nevertheless distinct and mutually incompatible.
-*/
+ */
 struct ExternType
 {
     using Props = TableType::Props;
@@ -610,8 +610,9 @@ struct ExternType
     //
     // Derived from `parent` at construction (a child inherits its parent's
     // root; a parentless type is its own root), so it can't drift. This is the
-    // single source of truth for "which hierarchy is this / is this a root",
-    // replacing the ~20 ad-hoc `parent`/`relation` derivations upstream had.
+    // single source of truth for "which hierarchy is this / is this a root";
+    // upstream has no `root` and derives the answer from `parent`/`relation`
+    // at each use.
     std::optional<TypeId> root;
 
     std::optional<TypeId> metatable; // metaclass?

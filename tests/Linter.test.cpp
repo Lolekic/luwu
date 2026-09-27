@@ -8,6 +8,7 @@
 #include "doctest.h"
 
 LUAU_FASTFLAG(DebugLuauForceOldSolver)
+LUAU_FASTFLAG(DebugLuauUserDefinedClasses)
 LUAU_FASTFLAG(LuauDeprecatedAttributeOnAnonymousFunctions)
 LUAU_FASTFLAG(LuauFunctionUnusedRecursiveLinting)
 LUAU_FASTFLAG(LuwuTableRemoveFootgunLint)
@@ -365,6 +366,54 @@ return bar()
 
     REQUIRE(1 == result.warnings.size());
     CHECK_EQ(result.warnings[0].text, "Variable 'a' shadows previous declaration at line 2");
+}
+
+TEST_CASE_FIXTURE(Fixture, "LocalShadowClass")
+{
+    ScopedFastFlag sff{FFlag::DebugLuauUserDefinedClasses, true};
+
+    // A local before the class hides it from the rest of the module, and one in a function hides it
+    // from the rest of that function; neither is `local cat` or an unrelated class's name.
+    LintResult result = lint(R"(
+local Cat = 1
+local before = Cat
+class Cat
+    public x: number = 2
+end
+local function f()
+    local function Cat() return 3 end
+    return Cat()
+end
+class Dog
+    public y: number = 1
+end
+local cat = Dog()
+return before, f, cat
+)");
+
+    REQUIRE(2 == result.warnings.size());
+    CHECK_EQ(result.warnings[0].code, LintWarning::Code_LocalShadow);
+    CHECK_EQ(result.warnings[0].location.begin.line, 1);
+    CHECK_EQ(result.warnings[0].text, "Variable 'Cat' shadows class 'Cat' declared at line 4");
+    CHECK_EQ(result.warnings[1].code, LintWarning::Code_LocalShadow);
+    CHECK_EQ(result.warnings[1].location.begin.line, 7);
+    CHECK_EQ(result.warnings[1].text, "Variable 'Cat' shadows class 'Cat' declared at line 4");
+}
+
+TEST_CASE_FIXTURE(Fixture, "LocalShadowClassAfterTheClass")
+{
+    ScopedFastFlag sff{FFlag::DebugLuauUserDefinedClasses, true};
+
+    LintResult result = lint(R"(
+class Cat
+    public x: number = 2
+end
+local Cat = 1
+return Cat
+)");
+
+    REQUIRE(1 == result.warnings.size());
+    CHECK_EQ(result.warnings[0].text, "Variable 'Cat' shadows class 'Cat' declared at line 2");
 }
 
 TEST_CASE_FIXTURE(Fixture, "LocalUnused")

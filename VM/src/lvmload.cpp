@@ -812,58 +812,45 @@ static int loadsafe(
                     }
                 }
 
-                uint32_t numMembersWithInit = hasCustomInit ? numMembers : numMembers + 1;
-                TString** offsetToMember = luaM_newarray(L, numMembersWithInit, TString*, L->activememcat);
-                uint8_t* memberFlags = luaM_newarray(L, numMembersWithInit, uint8_t, L->activememcat);
-                LuaTable* membersToOffset = luaH_new(L, 0, numMembersWithInit);
+                // A class without a custom `__init` still has an `__init` member, which only exists to
+                // be refused by name (luaR_sealclassshape); its slot stays nil.
+                uint32_t numStaticWithInit = hasCustomInit ? numMethods : numMethods + 1;
 
-                // Constant field defaults, one per instance member in offset order. Members are written
-                // properties-first, so index idx here is exactly the member's runtime offset.
-                TValue* memberDefaults = NULL;
+                // The class owns its shape buffers from here on, so nothing leaks if a later allocation fails.
+                LuauClass* lco = luaR_newclass(L, tsvalue(classname), numProperties, numStaticWithInit, hasConstDefaults);
 
-                if (hasConstDefaults)
-                {
-                    memberDefaults = luaM_newarray(L, numProperties, TValue, L->activememcat);
-                    for (uint32_t idx = 0; idx < numProperties; idx++)
-                        setnilvalue(&memberDefaults[idx]);
-                }
-
+                // Members are written properties-first, so index idx here is exactly the member's runtime
+                // offset.
                 for (uint32_t idx = 0; idx < numMembers; idx++)
                 {
                     uint32_t mid = readVarInt(data, size, offset);
                     TValue* memberName = &p->k[mid];
                     LUAU_ASSERT(ttisstring(memberName));
-                    offsetToMember[idx] = tsvalue(memberName);
-                    memberFlags[idx] = uint8_t(readVarInt(data, size, offset));
+                    lco->offsettomember[idx] = tsvalue(memberName);
+                    lco->memberflags[idx] = uint8_t(readVarInt(data, size, offset));
 
-                    if (memberFlags[idx] & LBC_CLASSMEMBER_CONSTDEFAULT)
+                    if (lco->memberflags[idx] & LBC_CLASSMEMBER_CONSTDEFAULT)
                     {
                         uint32_t did = readVarInt(data, size, offset);
-                        LUAU_ASSERT(memberDefaults && idx < numProperties);
-                        // the default's own constant is written before the shape, so it's already loaded
-                        setobj(L, &memberDefaults[idx], &p->k[did]);
+                        LUAU_ASSERT(lco->memberdefaults && idx < numProperties);
+                        // a constant field default; its own constant is written before the shape, so it's
+                        // already loaded
+                        setobj(L, &lco->memberdefaults[idx], &p->k[did]);
                     }
 
-                    TValue* val = luaH_setstr(L, membersToOffset, tsvalue(memberName));
+                    TValue* val = luaH_setstr(L, lco->memberstooffset, tsvalue(memberName));
                     setnvalue(val, idx);
                 }
 
                 if (!hasCustomInit)
                 {
-                    offsetToMember[numMembers] = initName;
-                    memberFlags[numMembers] = 0; // the default constructor is always public
-                    TValue* val = luaH_setstr(L, membersToOffset, initName);
+                    lco->offsettomember[numMembers] = initName;
+                    lco->memberflags[numMembers] = 0;
+                    TValue* val = luaH_setstr(L, lco->memberstooffset, initName);
                     setnvalue(val, numMembers);
-                    numMethods += 1;
                 }
 
-                membersToOffset->readonly = true;
-
-                LuauClass* lco = luaR_newclass(L, tsvalue(classname), membersToOffset, offsetToMember, memberFlags, numProperties, numMethods);
-                if (memberDefaults)
-                    luaR_setmemberdefaults(L, lco, memberDefaults);
-                if (!hasCustomInit)
-                    luaR_adddefaultinit(L, lco);
+                luaR_sealclassshape(L, lco);
                 setclassvalue(L, &p->k[j], lco);
                 break;
             }

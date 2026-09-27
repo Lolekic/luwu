@@ -572,12 +572,14 @@ expectpass("custom __init is used as the constructor", function()
     assert(user:reveal_ssn() == "126-222-1123")
 end)
 
-expectpass("custom __init can be called directly like a normal method", function()
-    local user = UserWithInit("a", "b", "c")
-    user:__init("Re", "Init", "999-99-9999")
-    assert(user:name() == "Re Init")
-    assert(user:reveal_ssn() == "999-99-9999")
-end)
+expectfail(
+    "a custom __init cannot be called as a method",
+    "'__init' of 'UserWithInit' cannot be accessed or called explicitly; construct a new object with UserWithInit(...) instead",
+    function()
+        local user = UserWithInit("a", "b", "c")
+        user:__init("Re", "Init", "999-99-9999")
+    end
+)
 
 expectfail(
     "private methods cannot be called from outside the class",
@@ -706,7 +708,7 @@ end)
 
 expectfail(
     "private __init cannot be called directly from outside the class",
-    "'__init' is a private member of 'Thingy', it cannot be accessed outside Thingy's class scope",
+    "the constructor of 'Thingy' is private; 'Thingy' can only be constructed inside Thingy's class scope",
     function()
         Thingy("meow")
     end
@@ -724,18 +726,16 @@ expectpass("classes without __init still use the default POD constructor", funct
     assert(not p2.x and not p2.y)
 end)
 
-expectpass("default __init can be called directly like a normal method", function()
+local BLOCKED_POINT_INIT = "'__init' of 'PointNoInit' cannot be accessed or called explicitly; construct a new object with PointNoInit(...) instead"
+
+expectfail("the default __init cannot be called as a method", BLOCKED_POINT_INIT, function()
     local p = PointNoInit({ x = 3, y = 4 })
     p:__init({ x = 5, y = 6 })
-    assert(p.x == 5 and p.y == 6)
-    p:__init()
-    assert(not p.x and not p.y)
 end)
 
-expectpass("default __init can be called directly on the class object", function()
+expectfail("the default __init cannot be read off the class", BLOCKED_POINT_INIT, function()
     local p = PointNoInit({ x = 3, y = 4 })
     PointNoInit.__init(p, { x = 7, y = 8 })
-    assert(p.x == 7 and p.y == 8)
 end)
 
 local widgetIdCounter = 0
@@ -1437,9 +1437,11 @@ expectpass("an annotation that lies about a receiver's class never runs the othe
         return v
     end)
 
-    -- when the call is inlined (-O2) the spliced CHECKSELFCLASS rejects the mismatched receiver;
-    -- when it isn't, the call dispatches dynamically to InlinePoint3D's own body. Running
-    -- InlinePoint2D's body against an InlinePoint3D (res == 3) is the bug, and is never allowed.
+    -- The call dispatches dynamically to InlinePoint3D's own body. Only an O2 compile with
+    -- DebugLuwuCompilerTrustsTypeAnnotations inlines it, and then the spliced CHECKSELFCLASS rejects the
+    -- mismatched receiver; the Classes test case doesn't set that flag, so the inlined branch is covered by
+    -- classes_inlining.luau (cases 8 and 16) instead. Running InlinePoint2D's body against an InlinePoint3D
+    -- (res == 3) is the bug, and is never allowed.
     if ok then
         assert(res == 300, `method call dispatched to the wrong class's body, got {res}`)
     else
@@ -2005,7 +2007,7 @@ expectfail(
     end
 )
 
-expectfail("a private primary constructor is private outside the class", "'__init' is a private member of 'PrimaryKey'", function()
+expectfail("a private primary constructor is private outside the class", "the constructor of 'PrimaryKey' is private", function()
     return PrimaryKey("taz", "nope")
 end)
 
@@ -2118,7 +2120,7 @@ end)
 
 expectfail(
     "a private primary constructor is not callable from outside its class",
-    "'__init' is a private member of 'PrimaryAccount'",
+    "the constructor of 'PrimaryAccount' is private",
     function()
         return PrimaryAccount("hax", 99)
     end
@@ -2129,18 +2131,21 @@ class PrimaryPoint(x: number, y: number) end
 class PrimaryOther(x: number) end
 
 expectfail(
-    "the synthesized '__init' rejects a receiver of the wrong class",
-    "attempt to call method 'PrimaryPoint.__init' with 'self' of class 'PrimaryOther'",
+    "the synthesized '__init' cannot be read off the class",
+    "'__init' of 'PrimaryPoint' cannot be accessed or called explicitly; construct a new object with PrimaryPoint(...) instead",
     function()
         return PrimaryPoint.__init(PrimaryOther(1), 1, 2)
     end
 )
 
-expectpass("the synthesized '__init' can be called on an instance of its own class", function()
-    local p = PrimaryPoint(1, 2)
-    p:__init(3, 4)
-    assert(p.x == 3 and p.y == 4)
-end)
+expectfail(
+    "the synthesized '__init' cannot be called on an instance of its own class",
+    "'__init' of 'PrimaryPoint' cannot be accessed or called explicitly; construct a new object with PrimaryPoint(...) instead",
+    function()
+        local p = PrimaryPoint(1, 2)
+        p:__init(3, 4)
+    end
+)
 
 -- a class with a primary constructor has no table constructor: the table is just argument one
 class PrimaryPackage(owner: string, contents: number) end
@@ -2195,7 +2200,7 @@ end)
 expectpass("pcall cannot launder a private constructor", function()
     local ok, err = pcall(PrivateBypass, "hax")
     assert(not ok, "pcall constructed a class with a private constructor")
-    assert(string.find(err, "'__init' is a private member of 'PrivateBypass'", 1, true), err)
+    assert(string.find(err, "the constructor of 'PrivateBypass' is private", 1, true), err)
 end)
 
 expectpass("xpcall cannot launder a private constructor", function()
@@ -2203,7 +2208,7 @@ expectpass("xpcall cannot launder a private constructor", function()
         return e
     end, "hax")
     assert(not ok, "xpcall constructed a class with a private constructor")
-    assert(string.find(err, "'__init' is a private member of 'PrivateBypass'", 1, true), err)
+    assert(string.find(err, "the constructor of 'PrivateBypass' is private", 1, true), err)
 end)
 
 expectpass("a coroutine cannot launder a private constructor", function()
@@ -2211,7 +2216,7 @@ expectpass("a coroutine cannot launder a private constructor", function()
         return PrivateBypass("hax")
     end))
     assert(not ok, "a coroutine constructed a class with a private constructor")
-    assert(string.find(err, "'__init' is a private member of 'PrivateBypass'", 1, true), err)
+    assert(string.find(err, "the constructor of 'PrivateBypass' is private", 1, true), err)
 end)
 
 expectpass("a C function callback cannot launder a private field read", function()
@@ -2332,9 +2337,9 @@ expectpass("a field initializer that captures an upvalue still constructs", func
     assert(PrimaryInlineCapture(3).scaled == 30)
 end)
 
--- Calling `__init` on a constructed object would reassign its `const` fields, so a class with any
--- `const` field makes its `__init` unreadable as a member, from anywhere. Construction never reads it by
--- name and is unaffected. See rfcs/classes.md.
+-- Calling `__init` on a constructed object would reassign its `const` fields, so no class's `__init` is
+-- readable as a member, from anywhere -- these cover the classes where that matters most. Construction
+-- never reads it by name and is unaffected. See rfcs/classes.md.
 
 class ConstInit
     public const id: number
@@ -2357,7 +2362,7 @@ end
 
 class ConstPrimary(const id: number, label: string) end
 
-local BLOCKED_INIT = "'__init' of 'ConstInit' cannot be accessed or called explicitly because ConstInit has const fields"
+local BLOCKED_INIT = "'__init' of 'ConstInit' cannot be accessed or called explicitly; construct a new object with ConstInit(...) instead"
 
 expectpass("a class with const fields still constructs through every constructor form", function()
     local a = ConstInit(1, "a")
@@ -2395,7 +2400,7 @@ end)
 
 expectfail(
     "a default __init is blocked on a POD class with const fields",
-    "'__init' of 'ConstPod' cannot be accessed or called explicitly because ConstPod has const fields",
+    "'__init' of 'ConstPod' cannot be accessed or called explicitly; construct a new object with ConstPod(...) instead",
     function()
         ConstPod { id = 1, label = "a" }:__init { id = 2 }
     end
@@ -2403,7 +2408,7 @@ expectfail(
 
 expectfail(
     "a primary constructor's __init is blocked when it has const parameters",
-    "'__init' of 'ConstPrimary' cannot be accessed or called explicitly because ConstPrimary has const fields",
+    "'__init' of 'ConstPrimary' cannot be accessed or called explicitly; construct a new object with ConstPrimary(...) instead",
     function()
         ConstPrimary(1, "a"):__init(2, "b")
     end
@@ -2413,10 +2418,9 @@ expectfail("native code cannot read a blocked __init either", BLOCKED_INIT, func
     pluginReadMember(ConstInit, "__init")
 end)
 
-expectpass("__init stays callable on classes without const fields", function()
+expectfail("__init is blocked on classes without const fields too", BLOCKED_POINT_INIT, function()
     local p = PointNoInit { x = 1, y = 2 }
     p:__init { x = 3, y = 4 }
-    assert(p.x == 3 and p.y == 4)
 end)
 
 expectpass("getmetatable returns nil for classes and objects, even with metamethods", function()

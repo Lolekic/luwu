@@ -381,10 +381,37 @@ l_noret luaG_constassignerror(lua_State* L, const TValue* p2, const TString* cla
     luaG_runerrorL(L, "'%s' is a const member of '%s' and cannot be assigned outside %s's '__init' constructor", getstr(tsvalue(p2)), t1, t1);
 }
 
+l_noret luaG_constassignnotselferror(lua_State* L, const TValue* p2, const TString* className)
+{
+    const char* t1 = getstr(className);
+    luaG_runerrorL(
+        L, "'%s' is a const member of '%s'; %s's '__init' can only assign it on the object it is constructing", getstr(tsvalue(p2)), t1, t1
+    );
+}
+
 l_noret luaG_blockedinitaccesserror(lua_State* L, const TString* className)
 {
     const char* t1 = getstr(className);
-    luaG_runerrorL(L, "'__init' of '%s' cannot be accessed or called explicitly because %s has const fields", t1, t1);
+    luaG_runerrorL(L, "'__init' of '%s' cannot be accessed or called explicitly; construct a new object with %s(...) instead", t1, t1);
+}
+
+static void pusherrorat(lua_State* L, CallInfo* ci, const char* msg);
+
+// Luwu Classes (rfcs/classes.md): raised by construction, which may be running in the class's C
+// constructor (`pcall(C)`), so the location is the Lua code constructing rather than the running frame.
+l_noret luaG_privateconstructorerror(lua_State* L, const TString* className)
+{
+    const char* t1 = getstr(className);
+    char result[LUA_BUFFERSIZE];
+    snprintf(result, sizeof(result), "the constructor of '%s' is private; '%s' can only be constructed inside %s's class scope", t1, t1, t1);
+
+    CallInfo* ci = L->ci;
+    while (ci > L->base_ci && !isLua(ci))
+        ci--;
+
+    lua_rawcheckstack(L, 1);
+    pusherrorat(L, ci, result);
+    luaD_throw(L, LUA_ERRRUN);
 }
 
 // Luwu Classes (rfcs/classes.md): raised by CHECKSELFCLASS when `self` isn't an object of the method's class.
@@ -396,10 +423,7 @@ l_noret luaG_blockedinitaccesserror(lua_State* L, const TString* className)
 // user their call site or annotation is wrong and isn't getting the O2 optimization they asked for.
 l_noret luaG_selfclasserror(lua_State* L, const TValue* self, const LuauClass* expected, const TString* methodName, bool selfCall)
 {
-    // `expected` is NULL only if malformed bytecode put a LBC_SELFCLASS_OWNER-form CHECKSELFCLASS in
-    // a proto that is not a class method, so its Proto::ownerclass was never stamped. The check then
-    // fails (nothing compares equal to NULL) and lands here; name it rather than dereferencing NULL.
-    const char* expectedName = expected ? getstr(expected->name) : "?";
+    const char* expectedName = getstr(expected->name);
     const char* method = getstr(methodName);
 
     if (!ttisobject(self))
@@ -428,9 +452,8 @@ l_noret luaG_selfclasserror(lua_State* L, const TValue* self, const LuauClass* e
     luaG_runerrorL(L, "attempt to call method '%s.%s' with 'self' of class '%s'", expectedName, method, actualName);
 }
 
-static void pusherror(lua_State* L, const char* msg)
+static void pusherrorat(lua_State* L, CallInfo* ci, const char* msg)
 {
-    CallInfo* ci = L->ci;
     if (isLua(ci))
     {
         TString* source = getluaproto(ci)->source;
@@ -443,6 +466,11 @@ static void pusherror(lua_State* L, const char* msg)
     {
         lua_pushstring(L, msg);
     }
+}
+
+static void pusherror(lua_State* L, const char* msg)
+{
+    pusherrorat(L, L->ci, msg);
 }
 
 l_noret luaG_runerrorL(lua_State* L, const char* fmt, ...)

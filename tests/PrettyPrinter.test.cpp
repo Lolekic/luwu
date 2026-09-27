@@ -16,6 +16,7 @@ LUAU_FASTFLAG(LuauCstAttr)
 LUAU_FASTFLAG(LuwuBetterUserDefinedClasses)
 LUAU_FASTFLAG(DebugLuauForceOldSolver)
 LUAU_FASTFLAG(LuwuDefaultArguments)
+LUAU_FASTFLAG(LuwuGenericNominals)
 
 using namespace Luau;
 
@@ -2213,6 +2214,60 @@ class Point
 end
     )";
     CHECK_EQ(code, prettyPrint(code, {}, true).code);
+}
+
+TEST_CASE("class_round_trip_keeps_generics_defaults_and_parameter_qualifiers")
+{
+    ScopedFastFlag fflags[] = {
+        {FFlag::DebugLuauUserDefinedClasses, true},
+        {FFlag::LuwuBetterUserDefinedClasses, true},
+        {FFlag::LuwuGenericNominals, true},
+        {FFlag::LuwuDefaultArguments, true},
+        {FFlag::LuauExportValueSyntax, true},
+    };
+
+    std::string code = R"(
+export class Box<T, U = string>(public const a: number, private b = 2, public c)
+    private const y = "s"
+    public z: number = a + 1
+    public w = {}
+    public function get(self): T
+        return self.a
+    end
+end
+class Plain<T...>
+    x: number = 1
+end
+    )";
+    CHECK_EQ(code, prettyPrint(code, {}, true).code);
+
+    code = R"(
+class Account private (private const holder: string)
+    public balance = 0
+end
+    )";
+    CHECK_EQ(code, prettyPrint(code, {}, true).code);
+}
+
+TEST_CASE("class_without_types_drops_generics")
+{
+    ScopedFastFlag fflags[] = {
+        {FFlag::DebugLuauUserDefinedClasses, true},
+        {FFlag::LuwuBetterUserDefinedClasses, true},
+        {FFlag::LuwuGenericNominals, true},
+    };
+
+    std::string code = R"(
+class Box<T>(a)
+    x: T
+end
+    )";
+    std::string expected = R"(
+class Box   (a)
+    x
+end
+    )";
+    CHECK_EQ(expected, prettyPrint(code, {}, false).code);
 }
 
 TEST_CASE("prettyPrint_function_attributes")

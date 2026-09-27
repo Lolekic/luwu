@@ -463,6 +463,17 @@ struct UninstantiableClass
     bool operator==(const UninstantiableClass& rhs) const;
 };
 
+// Reading `__init` by name from a class or one of its objects (`Class.__init`, `obj:__init()`):
+// construction is the only way to run a constructor, and the read raises at runtime
+// (see FFlag::DebugLuauUserDefinedClasses, FFlag::LuwuBetterUserDefinedClasses).
+struct ConstructorReadByName
+{
+    TypeId table;
+    Name className;
+
+    bool operator==(const ConstructorReadByName& rhs) const;
+};
+
 struct PropertyAccessViolation
 {
     TypeId table;
@@ -743,7 +754,8 @@ using TypeErrorData = Variant<
     InstantiateGenericsOnNonFunction,
     TypeInstantiationCountMismatch,
     AmbiguousFunctionCall,
-    UninstantiableClass>;
+    UninstantiableClass,
+    ConstructorReadByName>;
 
 struct TypeErrorSummary
 {

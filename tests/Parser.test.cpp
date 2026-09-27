@@ -3582,25 +3582,31 @@ TEST_CASE_FIXTURE(Fixture, "error_const_not_initialized")
 
 TEST_CASE_FIXTURE(Fixture, "error_const_reassignment")
 {
-    // LuauExportValueSyntax flag to get better error message change
-    ScopedFastFlag sffs[] = {{FFlag::LuauExportValueSyntax, true}};
+    // Luwu names the const variable whatever LuauExportValueSyntax is; upstream does only with it on.
+    for (bool exportValueSyntax : {false, true})
+    {
+        ScopedFastFlag sff{FFlag::LuauExportValueSyntax, exportValueSyntax};
 
-    matchParseError("const a = 42; a = 43", "Variable 'a' is constant and may not be reassigned");
+        matchParseError("const a = 42; a = 43", "Variable 'a' is constant and may not be reassigned");
 
-    matchParseError("local b; const a = 42; a, b = 43", "Variable 'a' is constant and may not be reassigned");
+        matchParseError("local b; const a = 42; a, b = 43", "Variable 'a' is constant and may not be reassigned");
 
-    matchParseError("local b; const a = 42; b, a = 43", "Variable 'a' is constant and may not be reassigned");
+        matchParseError("local b; const a = 42; b, a = 43", "Variable 'a' is constant and may not be reassigned");
 
-    matchParseError("local b; const a = 42; b, a = ...", "Variable 'a' is constant and may not be reassigned");
+        matchParseError("local b; const a = 42; b, a = ...", "Variable 'a' is constant and may not be reassigned");
 
-    matchParseError("const a = 42; function a() end", "Variable 'a' is constant and may not be reassigned");
+        matchParseError("const a = 42; function a() end", "Variable 'a' is constant and may not be reassigned");
+    }
 }
 
 TEST_CASE_FIXTURE(Fixture, "error_const_function_reassignment")
 {
-    ScopedFastFlag sffs[] = {{FFlag::LuauExportValueSyntax, true}};
+    for (bool exportValueSyntax : {false, true})
+    {
+        ScopedFastFlag sff{FFlag::LuauExportValueSyntax, exportValueSyntax};
 
-    matchParseError("const function a() return 42 end; a = 43", "Variable 'a' is constant and may not be reassigned");
+        matchParseError("const function a() return 42 end; a = 43", "Variable 'a' is constant and may not be reassigned");
+    }
 }
 
 TEST_CASE_FIXTURE(Fixture, "const_shadow")
@@ -4803,6 +4809,106 @@ print(t0)
     CHECK_EQ(result.errors[0].getLocation().begin.line, 4);
 }
 
+TEST_CASE_FIXTURE(Fixture, "unterminated_class_location_ends_before_the_next_statement")
+{
+    ScopedFastFlag sffs[] = {
+        {FFlag::DebugLuauUserDefinedClasses, true},
+        {FFlag::LuwuBetterUserDefinedClasses, true},
+    };
+
+    ParseResult result = tryParse(R"(
+class Pod
+    x = 1
+print(Pod)
+    )");
+
+    REQUIRE(result.errors.size() == 1);
+    REQUIRE(result.root->body.size == 2);
+
+    AstStatClass* cls = result.root->body.data[0]->as<AstStatClass>();
+    REQUIRE(cls);
+    CHECK(!cls->hasEnd);
+    // `x = 1` is the last thing the class contains; `print` belongs to the next statement
+    CHECK_EQ(cls->location.end, Position{2, 9});
+    CHECK_EQ(result.root->body.data[1]->location.begin, Position{3, 0});
+}
+
+TEST_CASE_FIXTURE(Fixture, "local_function_expr_location_starts_at_function")
+{
+    // Upstream starts the AstExprFunction of `local function` at `local`.
+    AstStatBlock* block = parse("local function f() end");
+    REQUIRE(block);
+    REQUIRE(block->body.size == 1);
+    AstStatLocalFunction* fn = block->body.data[0]->as<AstStatLocalFunction>();
+    REQUIRE(fn);
+    CHECK_EQ(fn->func->location.begin, Position{0, 6});
+    CHECK_EQ(fn->location.begin, Position{0, 0});
+}
+
+TEST_CASE_FIXTURE(Fixture, "class_method_self_is_const")
+{
+    ScopedFastFlag sffs[] = {
+        {FFlag::DebugLuauUserDefinedClasses, true},
+        {FFlag::LuwuBetterUserDefinedClasses, true},
+    };
+
+    const char* writes[] = {
+        "self = nil",
+        "local a; self, a = nil, nil",
+        "local a; a, self = nil, nil",
+        "self ..= 'x'",
+        "function self() end",
+        "local f = function() self = nil end",
+    };
+
+    // named whatever LuauExportValueSyntax is
+    for (bool exportValueSyntax : {false, true})
+    {
+        ScopedFastFlag sff{FFlag::LuauExportValueSyntax, exportValueSyntax};
+
+        for (const char* write : writes)
+        {
+            for (const char* method : {"function m(self)", "function __init(self)"})
+            {
+                std::string code = std::string("class C\n    ") + method + "\n        " + write + "\n    end\nend\n";
+                ParseResult result = tryParse(code);
+                REQUIRE_MESSAGE(result.errors.size() == 1, code);
+                CHECK_MESSAGE(result.errors[0].getMessage() == "Variable 'self' is constant and may not be reassigned", code);
+            }
+        }
+    }
+
+    const char* allowed[] = {
+        "local self = 1; self = 2",
+        "self.x = 1",
+        "self.x += 1",
+        "function self.x() end",
+        "local f = function(self) self = nil end",
+    };
+
+    for (const char* ok : allowed)
+    {
+        std::string code = std::string("class C\n    x = 0\n    function m(self)\n        ") + ok + "\n    end\nend\n";
+        ParseResult result = tryParse(code);
+        CHECK_MESSAGE(result.errors.empty(), code << ": " << (result.errors.empty() ? "" : result.errors[0].getMessage()));
+    }
+
+    // a static function's first parameter is only `self` by name when it is a method; any other name is an
+    // ordinary parameter
+    ParseResult staticParam = tryParse(R"(
+class C
+    function s(other)
+        other = nil
+    end
+end
+    )");
+    CHECK(staticParam.errors.empty());
+
+    // outside a class, `self` is an ordinary parameter
+    ParseResult freeFunction = tryParse("local function f(self) self = nil end");
+    CHECK(freeFunction.errors.empty());
+}
+
 TEST_CASE_FIXTURE(Fixture, "class_primary_constructor_rejects_variadic")
 {
     ScopedFastFlag sffs[] = {
@@ -4970,9 +5076,46 @@ TEST_CASE_FIXTURE(Fixture, "class_members_may_not_be_named_after_keywords")
     CHECK(ok.errors.empty());
 }
 
+TEST_CASE_FIXTURE(Fixture, "class_without_any_classes_flag_says_classes_are_disabled")
+{
+    ScopedFastFlag sffs[] = {
+        {FFlag::DebugLuauUserDefinedClasses, false},
+        {FFlag::LuwuBetterUserDefinedClasses, false},
+        {FFlag::LuauExportValueSyntax, true},
+    };
+
+    // Upstream reports "Incomplete statement: expected assignment or a function call" here.
+    ParseResult result = tryParse(R"(
+        class Point
+            x: number
+        end
+    )");
+
+    REQUIRE(!result.errors.empty());
+    CHECK_MESSAGE(
+        result.errors[0].getMessage().find("DebugLuauUserDefinedClasses") != std::string::npos,
+        "expected the flag names, got: " << result.errors[0].getMessage()
+    );
+
+    ParseResult exported = tryParse(R"(
+        export class Point
+            x: number
+        end
+    )");
+
+    REQUIRE(!exported.errors.empty());
+    CHECK_MESSAGE(
+        exported.errors[0].getMessage().find("DebugLuauUserDefinedClasses") != std::string::npos,
+        "expected the flag names, got: " << exported.errors[0].getMessage()
+    );
+}
+
 TEST_CASE_FIXTURE(Fixture, "class_without_feature_flag_says_classes_are_disabled")
 {
-    ScopedFastFlag _{FFlag::DebugLuauUserDefinedClasses, false};
+    ScopedFastFlag sffs[] = {
+        {FFlag::DebugLuauUserDefinedClasses, false},
+        {FFlag::LuwuBetterUserDefinedClasses, true},
+    };
 
     ParseResult result = tryParse(R"(
         class Point

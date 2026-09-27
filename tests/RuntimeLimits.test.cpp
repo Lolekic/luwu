@@ -499,30 +499,42 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "test_generic_pruning_recursion_limit")
     CHECK_EQ("<a>({ read Do: { read Re: { read Mi: a } } }) -> ()", toString(requireType("get")));
 }
 
-// deviaze: HACK: temporarily remove this test, nominal roots 1 -> 4 somehow gets this to fail only on Windows CI
-// TEST_CASE_FIXTURE(BuiltinsFixture, "unification_runs_a_limited_number_of_iterations_before_stopping_subtyping" * doctest::timeout(4.0))
-// {
-//     ScopedFastFlag _{FFlag::DebugLuauForceOldSolver, false};
+// Luwu: skipped under MSVC. With --fflags=true the Windows Debug build exhausts the unification budget first
+// (UnificationTooComplex, no NormalizationTooComplex). Which budget runs out first depends on the order the solver
+// visits types, and Luwu's four nominal roots (userdata, class, object, vector; upstream has one) change that order.
+#if defined(_MSC_VER)
+static constexpr bool kSkipUnificationIterationLimitTest = true;
+#else
+static constexpr bool kSkipUnificationIterationLimitTest = false;
+#endif
 
-//     ScopedFastInt sfis[] = {
-//         {FInt::LuauSubtypingIterationLimit, 100},
-//         {FInt::LuauTypeInferIterationLimit, 100},
-//     };
+TEST_CASE_FIXTURE(
+    BuiltinsFixture,
+    "unification_runs_a_limited_number_of_iterations_before_stopping_subtyping" * doctest::timeout(4.0) *
+        doctest::skip(kSkipUnificationIterationLimitTest)
+)
+{
+    ScopedFastFlag _{FFlag::DebugLuauForceOldSolver, false};
 
-//     CheckResult result = check(R"(
-//         local function l0<A...>()
-//             for l0=_,_ do
-//             end
-//         end
+    ScopedFastInt sfis[] = {
+        {FInt::LuauSubtypingIterationLimit, 100},
+        {FInt::LuauTypeInferIterationLimit, 100},
+    };
 
-//         _ = if _._ then function(l0)
-//         end elseif _._G then if `` then {n0=_,} else "luauExprConstantSt" elseif _[_][l0] then function()
-//         end elseif _.n0 then if _[_] then if _ then _ else "aeld" elseif false then 0 else "lead"
-//         return _.n0
-//     )");
+    CheckResult result = check(R"(
+        local function l0<A...>()
+            for l0=_,_ do
+            end
+        end
 
-//     LUAU_REQUIRE_ERROR(result, NormalizationTooComplex);
-// }
+        _ = if _._ then function(l0)
+        end elseif _._G then if `` then {n0=_,} else "luauExprConstantSt" elseif _[_][l0] then function()
+        end elseif _.n0 then if _[_] then if _ then _ else "aeld" elseif false then 0 else "lead"
+        return _.n0
+    )");
+
+    LUAU_REQUIRE_ERROR(result, NormalizationTooComplex);
+}
 
 #if defined(_MSC_VER) || defined(__APPLE__)
 

@@ -141,7 +141,10 @@ static TypeId shallowClone(TypeId ty, TypeArena& dest, const TxnLog* log)
             // cloned, so this stays valid even as `parent` is re-pointed to substituted children.
             clone.root = a.root;
             if (FFlag::DebugLuauUserDefinedClasses)
+            {
                 clone.relation = a.relation;
+                clone.initLocation = a.initLocation;
+            }
             if (FFlag::LuwuGenericNominals)
             {
                 clone.hasUnresolvedGenerics = a.hasUnresolvedGenerics;
@@ -889,9 +892,8 @@ void Substitution::replaceChildren(TypeId ty)
         }
 
         // `clone()` copies `relation` across verbatim and `isDirty` descends into it, so it has to
-        // be re-pointed here like every other child. Leaving it alone left the substituted copy
-        // holding a pointer into the arena the original came from, which is freed once that module
-        // is done, so `objectof` would later read whatever type had reused that slot.
+        // be re-pointed here like every other child: otherwise the substituted copy holds a pointer
+        // into the arena the original came from, which is freed once that module is done.
         if (FFlag::DebugLuauUserDefinedClasses && etv->relation)
         {
             Luau::visit(

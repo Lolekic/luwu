@@ -11371,7 +11371,7 @@ TEST_CASE("ClassIsinstanceProvenReceiverInlinesWithoutSelfCheck")
 {
     ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
     ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
-    // this test is about receivers the compiler knows only from an annotation
+    // only `annotated`, the contrast case, needs annotations trusted to inline at all
     ScopedFastFlag trustAnnotations{FFlag::DebugLuwuCompilerTrustsTypeAnnotations, true};
 
     // Inside `if class.isinstance(p, Path)`, JUMPXISA has checked the exact class on this path and the
@@ -11665,7 +11665,7 @@ end
         std::string code = bcb.dumpFunction(f);
 
         CHECK_MESSAGE(code.find("NAMECALL") == std::string::npos, "function " << f << " did not inline after the assert");
-        CHECK_MESSAGE(code.find("CHECKSELFCLASS") == std::string::npos, "function " << f << " kept a check a proven receiver does not need");
+        CHECK_MESSAGE(code.find("] SELF") == std::string::npos, "function " << f << " kept a check a proven receiver does not need");
         CHECK_MESSAGE(code.find("GETOBJECTMEMBER") != std::string::npos, "function " << f << " did not reach the object path");
     }
 
@@ -11757,7 +11757,7 @@ end
             std::string code = bcb.dumpFunction(f);
 
             CHECK_MESSAGE(code.find("NAMECALL") == std::string::npos, "function " << f << " stopped inlining a proven receiver");
-            CHECK_MESSAGE(code.find("CHECKSELFCLASS") == std::string::npos, "function " << f << " kept a check a proven receiver does not need");
+            CHECK_MESSAGE(code.find("] SELF") == std::string::npos, "function " << f << " kept a check a proven receiver does not need");
         }
     }
 
@@ -11775,7 +11775,9 @@ end
             std::string code = bcb.dumpFunction(f);
 
             CHECK_MESSAGE(code.find("NAMECALL") == std::string::npos, "function " << f << " did not inline with the trust flag on");
-            CHECK_MESSAGE(code.find("SELF") != std::string::npos, "function " << f << " inlined a trusted receiver without a check");
+            // the inline site's check is the `:` form, which the dump marks with a trailing SELF; the method's
+            // own prologue check (function 1 is a method) has no such marker
+            CHECK_MESSAGE(code.find("] SELF") != std::string::npos, "function " << f << " inlined a trusted receiver without a check");
         }
     }
 }
@@ -11924,6 +11926,566 @@ end
 
     std::string code = bcb.dumpFunction(1);
     CHECK(code.find("NAMECALL") != std::string::npos);
+}
+
+TEST_CASE("ClassUsedBeforeItsDeclarationChecksItsBinding")
+{
+    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+
+    // rfcs/classes.md: a class binding is nil until its declaration runs, and a function declared above
+    // the class can run first. NEWOBJECT and an unchecked JUMPXISA take the class operand on trust, so code
+    // above the declaration checks the binding; code below it can't see nil and pays nothing.
+    const char* source = R"(
+local function early(n)
+    local p = Pt(n)
+    if class.isinstance(n, Pt) then
+        return 1
+    end
+    return p
+end
+
+class Pt(public x: number)
+end
+
+local function late(n)
+    local p = Pt(n)
+    if class.isinstance(n, Pt) then
+        return 1
+    end
+    return p
+end
+)";
+
+    // 0 is early, 1 is late
+    std::string early = compileFunction(source, 0, 1);
+    CHECK(early.find("JUMPXEQKNIL") != std::string::npos);
+    CHECK(early.find("CHECKCLASS") != std::string::npos);
+    CHECK(early.find("NEWOBJECT") != std::string::npos);
+
+    std::string late = compileFunction(source, 1, 1);
+    CHECK(late.find("JUMPXEQKNIL") == std::string::npos);
+    CHECK(late.find("CHECKCLASS") == std::string::npos);
+    CHECK(late.find("NEWOBJECT") != std::string::npos);
+}
+
+TEST_CASE("ClassPrimaryConstructorFieldsFormKeepsPrivateAccess")
+{
+    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+
+    // rfcs/classes.md: a primary constructor's initializers are class code, so the construction site may
+    // compile them itself (NEWOBJECT ... FIELDS) only where that doesn't change what they may access.
+    // Ordinary initializers keep the fast path everywhere; one naming a private member keeps it only inside
+    // the class.
+    const char* source = R"(
+class Vec(public x: number, public y: number)
+    public len = math.sqrt(x * x + y * y)
+end
+
+class Spy(public c)
+    public stolen = c.secret
+end
+
+class Guard(public v: number)
+    public w = Guard.helper(v)
+
+    private function helper(v)
+        return v
+    end
+
+    public function copy(self)
+        local g = Guard(self.v)
+        return g
+    end
+end
+
+function outsideVec(a)
+    local v = Vec(a, a)
+    return v
+end
+
+function outsideSpy(a)
+    local s = Spy(a)
+    return s
+end
+
+function outsideGuard(a)
+    local g = Guard(a)
+    return g
+end
+)";
+
+    // 0 is Guard.helper, 1 is Guard:copy
+    CHECK(compileFunction(source, 1, 1).find("FIELDS") != std::string::npos);
+    CHECK(compileFunction(source, 2, 1).find("FIELDS") != std::string::npos);
+
+    // `c.secret` names no member private to Spy or to the site's class (there is none), so it may move
+    CHECK(compileFunction(source, 3, 1).find("FIELDS") != std::string::npos);
+
+    // `Guard.helper` is private to Guard, so outside Guard it runs in `__init`
+    std::string outsideGuard = compileFunction(source, 4, 1);
+    CHECK(outsideGuard.find("FIELDS") == std::string::npos);
+    CHECK(outsideGuard.find("INIT") != std::string::npos);
+}
+
+TEST_CASE("ClassPrimaryConstructorFieldsFormInsideAnotherClass")
+{
+    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+
+    // Constructing a class inside another class's method runs its initializers with that class's private
+    // access if they are compiled at the site, so one that names a member private to the site's class
+    // keeps the `__init` call.
+    const char* source = R"(
+class Spy(public c)
+    public stolen = c.secret
+end
+
+class Vault
+    private secret = "hunter2"
+
+    public function lend(self)
+        local s = Spy(self)
+        return s
+    end
+end
+)";
+
+    // 0 is Vault:lend
+    std::string lend = compileFunction(source, 0, 1);
+    CHECK(lend.find("FIELDS") == std::string::npos);
+    CHECK(lend.find("INIT") != std::string::npos);
+}
+
+TEST_CASE("ClassRecursivePrimaryConstructorFallsBackToInit")
+{
+    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+
+    // rfcs/classes.md: an initializer may construct its own class. The site expands the initializers once,
+    // and the construction inside them goes through `__init`, as does the one in `__init` itself.
+    const char* source = R"(
+class Node(public depth: number)
+    public child = if depth > 0 then Node(depth - 1) else nil
+end
+
+function make(n)
+    local node = Node(n)
+    return node
+end
+)";
+
+    // 0 is make, 1 is Node's `__init`
+    std::string make = compileFunction(source, 0, 1);
+    CHECK(make.find("FIELDS") != std::string::npos);
+    CHECK(make.find("INIT") != std::string::npos);
+
+    std::string init = compileFunction(source, 1, 1);
+    CHECK(init.find("FIELDS") == std::string::npos);
+    CHECK(init.find("INIT") != std::string::npos);
+}
+
+TEST_CASE("ClassAssertIsinstanceFailurePathRaises")
+{
+    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+
+    // rfcs/classes.md: the region after a fused `assert(class.isinstance(...))` is proven, so the failing
+    // path must not reach it even when the environment's `assert` returns: the assert call is followed by
+    // a second check that raises. A message with side effects is evaluated even when the check passes, so
+    // that form isn't fused at all.
+    const char* source = R"(
+class Vec(public x: number)
+end
+
+local function message()
+    return "bad"
+end
+
+function fused(p): number
+    assert(class.isinstance(p, Vec), "expected a Vec")
+    local r = p.x
+    return r
+end
+
+function withCall(p): number
+    assert(class.isinstance(p, Vec), message())
+    local r = p.x
+    return r
+end
+)";
+
+    // 0 is message, 1 is fused, 2 is withCall
+    std::string fused = compileFunction(source, 1, 1);
+    size_t call = fused.find("[assert]");
+    REQUIRE(call != std::string::npos);
+    CHECK(fused.find("JUMPXISA") < call);
+    CHECK(fused.find("JUMPXISA", call) != std::string::npos);
+    CHECK(fused.find("CHECKSELFCLASS", call) != std::string::npos);
+
+    std::string withCall = compileFunction(source, 2, 1);
+    CHECK(withCall.find("JUMPXISA") == std::string::npos);
+    CHECK(withCall.find("[assert]") != std::string::npos);
+}
+
+TEST_CASE("ClassAssertIsinstanceProvesInlinedAndRepeatBodies")
+{
+    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+
+    // An assert proves the rest of the statement list it is in, including the body of a function inlined
+    // into another, and a repeat body.
+    const char* source = R"(
+class Cat
+    public name: string = "cat"
+
+    public function meow(self)
+        return "meow " .. self.name
+    end
+end
+
+local function speak(c)
+    assert(class.isinstance(c, Cat))
+    local r = c:meow()
+    return r
+end
+
+function viaInlinedBody(x)
+    local r = speak(x)
+    return r
+end
+
+function viaRepeat(c)
+    local r
+    repeat
+        assert(class.isinstance(c, Cat))
+        r = c:meow()
+    until true
+    return r
+end
+)";
+
+    // 0 is Cat:meow, 1 is speak, 2 is viaInlinedBody, 3 is viaRepeat
+    for (int f : {1, 2, 3})
+    {
+        std::string code = compileFunction(source, f, 2);
+
+        CHECK_MESSAGE(code.find("NAMECALL") == std::string::npos, "function " << f << " did not inline a proven receiver");
+        CHECK_MESSAGE(code.find("] SELF") == std::string::npos, "function " << f << " kept a check a proven receiver does not need");
+    }
+}
+
+TEST_CASE("ClassMethodInlinedIntoAnotherClassGainsNoPrivateAccess")
+{
+    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+
+    // rfcs/classes.md: an inlined body runs under the caller's closure. Cat's method inlined into a Dog
+    // method would read Dog's private fields with Dog's access, which the call doesn't have, so a body that
+    // names one keeps the call. One that doesn't still inlines.
+    const char* source = R"(
+class Cat
+    public name: string = "cat"
+
+    public function snoop(self, d)
+        return d.secret
+    end
+
+    public function greet(self)
+        return "hi " .. self.name
+    end
+end
+
+class Dog
+    private secret: string = "bone"
+
+    public function peek(self)
+        local cat = Cat()
+        local r = cat:snoop(self)
+        return r
+    end
+
+    public function greetCat(self)
+        local cat = Cat()
+        local r = cat:greet()
+        return r
+    end
+end
+)";
+
+    // 0 and 1 are Cat's methods, 2 is Dog:peek, 3 is Dog:greetCat
+    CHECK(compileFunction(source, 2, 2).find("NAMECALL") != std::string::npos);
+    CHECK(compileFunction(source, 3, 2).find("NAMECALL") == std::string::npos);
+}
+
+TEST_CASE("ClassMethodPassingObjectsToPodConstructionKeepsItsCall")
+{
+    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+
+    // rfcs/classes.md: a POD constructor reads an object argument's fields with the private access of the
+    // nearest Lua frame, which is the caller's once the body is inlined. So a body of a class with private
+    // members that may hand an object to a POD construction -- directly, or through a C function like
+    // `pcall` -- keeps its call outside the class. A table argument can't be an object and still inlines.
+    const char* source = R"(
+class Bag
+    public token: string
+end
+
+class Vaulted
+    private token: string = "hunter2"
+
+    public function direct(self)
+        local t = Bag(self)
+        return t
+    end
+
+    public function viaPcall(self)
+        local ok, t = pcall(Bag, self)
+        return t
+    end
+
+    public function fromTable(self)
+        local t = Bag({ token = "copy" })
+        return t
+    end
+end
+
+function useDirect()
+    local v = Vaulted()
+    local r = v:direct()
+    return r
+end
+
+function useViaPcall()
+    local v = Vaulted()
+    local r = v:viaPcall()
+    return r
+end
+
+function useFromTable()
+    local v = Vaulted()
+    local r = v:fromTable()
+    return r
+end
+)";
+
+    // 0-2 are Vaulted's methods, then useDirect, useViaPcall, useFromTable
+    CHECK(compileFunction(source, 3, 2).find("NAMECALL") != std::string::npos);
+    CHECK(compileFunction(source, 4, 2).find("NAMECALL") != std::string::npos);
+    CHECK(compileFunction(source, 5, 2).find("NAMECALL") == std::string::npos);
+}
+
+TEST_CASE("ClassAnnotationResolutionRespectsShadowingAndDeclarationOrder")
+{
+    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag trustAnnotations{FFlag::DebugLuwuCompilerTrustsTypeAnnotations, true};
+
+    // A trusted annotation names a class only if nothing can shadow the name: the compiler has no type
+    // scopes, and `type Node = Other` inside a function names a different class. And a trusted receiver
+    // above the class's declaration keeps its call, because the inline site's check reads the class binding,
+    // which may still be nil there.
+    const char* source = R"(
+local function early(v: Late)
+    local r = v:get()
+    return r
+end
+
+class Node(public v: number)
+    public function get(self)
+        return self.v
+    end
+end
+
+class Other(public v: number)
+    public function get(self)
+        return self.v * 10
+    end
+end
+
+class Late(public v: number)
+    public function get(self)
+        return self.v
+    end
+end
+
+function shadowed(x)
+    type Node = Other
+    local y: Node = x
+    local r = y:get()
+    return r
+end
+
+function direct(x: Other)
+    local r = x:get()
+    return r
+end
+
+function afterDeclaration(v: Late)
+    local r = v:get()
+    return r
+end
+)";
+
+    // 0 is early, 1-3 are the classes' `get`, 4 is shadowed, 5 is direct, 6 is afterDeclaration
+    CHECK(compileFunction(source, 0, 2).find("NAMECALL") != std::string::npos);
+    CHECK(compileFunction(source, 4, 2).find("NAMECALL") != std::string::npos);
+    CHECK(compileFunction(source, 5, 2).find("NAMECALL") == std::string::npos);
+    CHECK(compileFunction(source, 6, 2).find("NAMECALL") == std::string::npos);
+}
+
+TEST_CASE("ClassUnfusedAssertIsinstanceProvesNothing")
+{
+    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+
+    // Only a fused assert is followed by the recheck that raises when the environment's `assert` returns, so
+    // an assert whose message can't be read twice leaves its receiver unproven.
+    const char* source = R"(
+class Cat
+    public name: string = "cat"
+
+    public function meow(self)
+        return "meow " .. self.name
+    end
+end
+
+local function message()
+    return "m"
+end
+
+function unfused(c)
+    assert(class.isinstance(c, Cat), message())
+    local r = c:meow()
+    return r
+end
+
+function fused(c)
+    assert(class.isinstance(c, Cat), "m")
+    local r = c:meow()
+    return r
+end
+)";
+
+    // 0 is Cat:meow, 1 is message, 2 is unfused, 3 is fused
+    CHECK(compileFunction(source, 2, 2).find("NAMECALL") != std::string::npos);
+    CHECK(compileFunction(source, 3, 2).find("NAMECALL") == std::string::npos);
+}
+
+TEST_CASE("ClassInliningGainsNothingFromDeclarationsOrFields")
+{
+    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag trustAnnotations{FFlag::DebugLuwuCompilerTrustsTypeAnnotations, true};
+
+    // Inlined into a Dog method, a Cat method runs with Dog's private access. A declared table type on Cat's
+    // field doesn't make what it holds safe to hand to a POD construction there (a lie would gain access), and
+    // `self:cb()` reaches a method only if the class has one by that name; a field holding a POD class isn't.
+    const char* source = R"(
+class Bag
+    public token: string = "none"
+end
+
+class Cat
+    public inner: { token: string }
+    public cb: any = Bag
+
+    public function __init(self, x)
+        self.inner = x
+    end
+
+    public function copy(self)
+        local t = Bag(self.inner)
+        return t
+    end
+
+    public function viaField(self)
+        local t = self:cb()
+        return t
+    end
+end
+
+class Dog
+    private token: string = "bone"
+
+    public function peek(self)
+        local c = Cat(self)
+        local r = c:copy()
+        return r
+    end
+
+    public function peekField(self)
+        local c = Cat(self)
+        local r = c:viaField()
+        return r
+    end
+end
+)";
+
+    // 0-2 are Cat's methods, 3 and 4 are Dog's
+    CHECK(compileFunction(source, 3, 2).find("NAMECALL") != std::string::npos);
+    CHECK(compileFunction(source, 4, 2).find("NAMECALL") != std::string::npos);
+}
+
+TEST_CASE("ClassInitDoesNotInlineConstFieldWrites")
+{
+    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+
+    // rfcs/classes.md: a `const` field is written only by its class's `__init`, checked against the running
+    // closure. A function `__init` calls must not be inlined into it if it may write one of the class's const
+    // fields, or the write would pass. Other calls still inline.
+    const char* source = R"(
+local function writeConst(obj)
+    obj.c = 1
+end
+
+local function writeOther(obj)
+    obj.d = 1
+end
+
+class K
+    public const c: number = 0
+    public d: number = 0
+
+    public function __init(self)
+        writeConst(self)
+        writeOther(self)
+    end
+end
+)";
+
+    // 0 is writeConst, 1 is writeOther, 2 is K's `__init`
+    std::string init = compileFunction(source, 2, 2);
+
+    // one call remains, to writeConst; writeOther's `obj.d = 1` was inlined next to the prologue's defaults
+    size_t call = init.find("\nCALL ");
+    REQUIRE(call != std::string::npos);
+    CHECK(init.find("\nCALL ", call + 1) == std::string::npos);
+    CHECK(init.find("['d']") != init.rfind("['d']"));
+}
+
+TEST_CASE("InlinedDefaultArgumentReadsConstantOuterLocal")
+{
+    ScopedFastFlag defaultArguments{FFlag::LuwuDefaultArguments, true};
+
+    // Luwu (default arguments): a default reading a local that folded to a constant is compiled at the inline
+    // site, where that local has no register; it has to fold there too. In the main chunk there is no upvalue
+    // to fall back on.
+    const char* source = R"(
+local x = 1
+local function f(a, y = x)
+    return y
+end
+local r = f("p")
+return r
+)";
+
+    std::string main = compileFunction(source, 1, 2);
+    CHECK(main.find("GETUPVAL") == std::string::npos);
+    CHECK(main.find("CALL") == std::string::npos);
 }
 
 TEST_CASE("ClassDeclWithMethod")
@@ -13418,3 +13980,169 @@ RETURN R3 1
 }
 
 TEST_SUITE_END();
+
+// Compiler B (classes review) begin
+
+TEST_SUITE_BEGIN("Compiler");
+
+// The type info of function `id` (arguments, upvalues, locals), with local ranges dropped so the expectation
+// doesn't depend on the code around them.
+static std::string compileTypesWithoutRanges(const char* source, uint32_t id, int optimizationLevel)
+{
+    Luau::BytecodeBuilder bcb;
+    bcb.setDumpFlags(Luau::BytecodeBuilder::Dump_Code | Luau::BytecodeBuilder::Dump_Types);
+
+    Luau::CompileOptions options;
+    options.optimizationLevel = optimizationLevel;
+    options.typeInfoLevel = 1;
+
+    Luau::compileOrThrow(bcb, source, options);
+
+    std::string dump = bcb.dumpFunction(id);
+    std::string result;
+    for (std::string_view line : Luau::split(dump, '\n'))
+    {
+        // type info lines look like `R0: object [argument]`, `U0: class` or `R1: object from 3 to 25`
+        bool isTypeInfo = line.size() > 1 && (line[0] == 'R' || line[0] == 'U') && isdigit(line[1]) && line.find(": ") != std::string_view::npos;
+        if (!isTypeInfo)
+            continue;
+
+        result += "\n";
+        result += line.substr(0, line.find(" from "));
+    }
+
+    return result + "\n";
+}
+
+TEST_CASE("ClassTypeHintsSeeClassesDeclaredLater")
+{
+    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag genericNominals{FFlag::LuwuGenericNominals, true};
+
+    // Classes hoist, so code above a declaration sees the class. A `Cat` annotation there is an object, not the
+    // host-userdata guess an unknown type name gets: that guess becomes an entry guard every real argument
+    // fails. A construction (`Cat()`) is an object. A static call declared to return a class (`Cat.new()`) is one
+    // only when annotations are trusted, and never when the return type is optional or is a generic (of the class
+    // or the method) spelled like a class.
+    const char* source = R"(
+local function before(c: Cat) return c.x end
+local function f()
+    local a = Cat()
+    local b = Cat.new()
+    local c = Cat.maybe()
+    local d = Box.get()
+    local e = Cat.pick(a)
+    return a, b, c, d, e
+end
+class Cat
+    public x = 0
+    public function new(): Cat return Cat() end
+    public function maybe(): Cat? return nil end
+    public function pick<Cat>(v: Cat): Cat return v end
+end
+class Box<Cat>
+    public function get(): Cat return nil :: any end
+end
+local function after(c: Cat) return c.x end
+)";
+
+    for (bool trusted : {false, true})
+    {
+        ScopedFastFlag trust{FFlag::DebugLuwuCompilerTrustsTypeAnnotations, trusted};
+
+        for (int optimizationLevel = 1; optimizationLevel <= 2; ++optimizationLevel)
+        {
+            CHECK_EQ(compileTypesWithoutRanges(source, 0, optimizationLevel), R"(
+R0: object [argument]
+)");
+
+            CHECK_EQ(
+                compileTypesWithoutRanges(source, 1, optimizationLevel),
+                std::string(R"(
+U0: class
+U1: class
+R0: object
+R1: )") + (trusted ? "object" : "any") +
+                    R"(
+R2: any
+R3: any
+R4: any
+)"
+            );
+
+            CHECK_EQ(compileTypesWithoutRanges(source, 6, optimizationLevel), R"(
+R0: object [argument]
+)");
+        }
+    }
+}
+
+TEST_CASE("ClassConstructionHintSkipsWrittenLocals")
+{
+    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+
+    // Codegen guards a local's declared type with a VM exit, so a construction's `object` hint on a local that is
+    // later written would exit on every call once the write runs. Only `kept` is never written.
+    const char* source = R"(
+class Cat
+    public x = 0
+end
+local function f(t)
+    local kept = Cat()
+    local reassigned = Cat()
+    reassigned = t
+    local fromClosure = Cat()
+    local function set() fromClosure = t end
+    return kept.x, reassigned.x, fromClosure.x, set
+end
+)";
+
+    for (int optimizationLevel = 1; optimizationLevel <= 2; ++optimizationLevel)
+    {
+        // R1 `kept`, R2 `reassigned`, R3 `fromClosure`, R4 `set`
+        CHECK_EQ(compileTypesWithoutRanges(source, 1, optimizationLevel), R"(
+U0: class
+R1: object
+R2: any
+R3: any
+R4: any
+)");
+
+        // `set` captures `fromClosure` and `t`
+        CHECK_EQ(compileTypesWithoutRanges(source, 0, optimizationLevel), R"(
+U0: any
+U1: any
+)");
+    }
+}
+
+TEST_CASE("ClassTypeTagsNeedClasses")
+{
+    // `class` and `object` only name the class type tags while classes are on; otherwise they are ordinary type
+    // names, guessed to be host userdata as upstream does
+    const char* source = R"(
+local function f(x: object, y: class) return x end
+)";
+
+    {
+        ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, false};
+
+        CHECK_EQ(compileTypesWithoutRanges(source, 0, 1), R"(
+R0: userdata [argument]
+R1: userdata [argument]
+)");
+    }
+
+    {
+        ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
+
+        CHECK_EQ(compileTypesWithoutRanges(source, 0, 1), R"(
+R0: object [argument]
+R1: class [argument]
+)");
+    }
+}
+
+// Compiler B (classes review) end

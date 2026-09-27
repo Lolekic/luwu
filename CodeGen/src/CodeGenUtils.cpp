@@ -49,6 +49,14 @@ LUAU_FASTFLAG(DebugLuauUserDefinedClassesRuntime)
 #define VM_PATCH_C(pc, slot) *const_cast<Instruction*>(pc) = ((uint8_t(slot) << 24) | (0x00ffffffu & *(pc)))
 #define VM_PATCH_E(pc, slot) *const_cast<Instruction*>(pc) = ((uint32_t(slot) << 8) | (0x000000ffu & *(pc)))
 
+// Luwu Classes (rfcs/classes.md): caches a member offset in operand C, as the interpreter's
+// VM_PATCH_MEMBER_SLOT does (see LUAR_MAX_CACHED_MEMBER_SLOT).
+static void patchCachedMemberSlot(const Instruction* pc, uint32_t offset)
+{
+    if (offset <= LUAR_MAX_CACHED_MEMBER_SLOT)
+        VM_PATCH_C(pc, offset);
+}
+
 #define VM_INTERRUPT() \
     { \
         void (*interrupt)(lua_State*, int) = L->global->cb.interrupt; \
@@ -576,8 +584,8 @@ const Instruction* executeGETTABLEKS(lua_State* L, const Instruction* pc, StkId 
 
         // Luwu Classes (rfcs/classes.md): the native TRY_OBJECT_MEMBER_ADDR/TRY_CLASS_MEMBER_ADDR
         // fast paths bail here on a stale cached slot. Mirror the interpreter's LOP_GETTABLEKS object/
-        // class handling *and* patch the cached slot (VM_PATCH_C) so the next native access hits the
-        // fast path -- without this, every access re-misses and re-enters this fallback forever.
+        // class handling and patch the cached slot, which the native fast paths only read: this
+        // fallback is the only place native code learns it.
         if (FFlag::DebugLuauUserDefinedClassesRuntime && ttisobject(rb))
         {
             uint8_t slot = LUAU_INSN_C(insn);
@@ -587,8 +595,7 @@ const Instruction* executeGETTABLEKS(lua_State* L, const Instruction* pc, StkId 
 
             if (slot < inst->lclass->numberofallmembers && tsvalue(kv) == inst->lclass->offsettomember[slot])
             {
-                if (inst->lclass->hasprivatemembers)
-                    luaR_checkprivateaccess(L, kv, inst->lclass, cl, slot);
+                luaR_checkprivateaccessfast(L, kv, inst->lclass, cl, slot);
                 setobj2s(L, ra, luaR_lookupmemberatoffset(inst, slot));
                 return pc;
             }
@@ -598,10 +605,9 @@ const Instruction* executeGETTABLEKS(lua_State* L, const Instruction* pc, StkId 
                 if (ttisnil(offset))
                     luaG_missingmembererror(L, rb, kv);
                 const uint32_t offsetnum = uint32_t(nvalue(offset));
-                if (inst->lclass->hasprivatemembers)
-                    luaR_checkprivateaccess(L, kv, inst->lclass, cl, offsetnum);
+                luaR_checkprivateaccessfast(L, kv, inst->lclass, cl, offsetnum);
                 setobj2s(L, ra, luaR_lookupmemberatoffset(inst, offsetnum));
-                VM_PATCH_C(pc - 2, offsetnum);
+                patchCachedMemberSlot(pc - 2, offsetnum);
                 return pc;
             }
         }
@@ -614,8 +620,7 @@ const Instruction* executeGETTABLEKS(lua_State* L, const Instruction* pc, StkId 
 
             if (slot < lco->numberofallmembers && slot >= lco->numberofinstancemembers && tsvalue(kv) == lco->offsettomember[slot])
             {
-                if (lco->hasprivatemembers)
-                    luaR_checkprivateaccess(L, kv, lco, cl, slot);
+                luaR_checkprivateaccessfast(L, kv, lco, cl, slot);
                 setobj2s(L, ra, &lco->staticmembers[slot - lco->numberofinstancemembers]);
                 return pc;
             }
@@ -628,10 +633,9 @@ const Instruction* executeGETTABLEKS(lua_State* L, const Instruction* pc, StkId 
                 // accessing an instance member (field) through the class object itself is an error
                 if (offsetnum < lco->numberofinstancemembers)
                     luaG_instancefieldonclasserror(L, rb, kv);
-                if (lco->hasprivatemembers)
-                    luaR_checkprivateaccess(L, kv, lco, cl, offsetnum);
+                luaR_checkprivateaccessfast(L, kv, lco, cl, offsetnum);
                 setobj2s(L, ra, &lco->staticmembers[offsetnum - lco->numberofinstancemembers]);
-                VM_PATCH_C(pc - 2, offsetnum);
+                patchCachedMemberSlot(pc - 2, offsetnum);
                 return pc;
             }
         }
@@ -709,7 +713,7 @@ const Instruction* executeSETTABLEKS(lua_State* L, const Instruction* pc, StkId 
 
         // Luwu Classes (rfcs/classes.md): the native TRY_OBJECT_MEMBER_ADDR (write mode) fast path
         // bails here on a stale cached slot. Mirror the interpreter's LOP_SETTABLEKS object handling
-        // *and* patch the cached slot (VM_PATCH_C) so the next native store hits the fast path.
+        // and patch the cached slot, as executeGETTABLEKS does.
         if (FFlag::DebugLuauUserDefinedClassesRuntime && ttisobject(rb))
         {
             uint8_t slot = LUAU_INSN_C(insn);
@@ -719,13 +723,9 @@ const Instruction* executeSETTABLEKS(lua_State* L, const Instruction* pc, StkId 
 
             if (slot < inst->lclass->numberofinstancemembers && tsvalue(kv) == inst->lclass->offsettomember[slot])
             {
-                if (inst->lclass->hasprivatemembers || inst->lclass->hasconstmembers)
-                {
-                    if (inst->lclass->hasprivatemembers)
-                        luaR_checkprivateaccess(L, kv, inst->lclass, cl, slot);
-                    if (inst->lclass->hasconstmembers)
-                        luaR_checkconstassign(L, kv, inst->lclass, cl, slot);
-                }
+                luaR_checkprivateaccessfast(L, kv, inst->lclass, cl, slot);
+                if (LUAU_UNLIKELY(inst->lclass->hasconstmembers))
+                    luaR_checkconstassignfast(L, kv, inst, cl, slot);
                 setobj2class(L, &inst->members[slot], ra);
                 luaC_barrier(L, inst, ra);
                 return pc;
@@ -738,16 +738,12 @@ const Instruction* executeSETTABLEKS(lua_State* L, const Instruction* pc, StkId 
                 const uint32_t offsetnum = uint32_t(nvalue(offset));
                 if (offsetnum >= inst->lclass->numberofinstancemembers)
                     luaG_indexerror(L, rb, kv);
-                if (inst->lclass->hasprivatemembers || inst->lclass->hasconstmembers)
-                {
-                    if (inst->lclass->hasprivatemembers)
-                        luaR_checkprivateaccess(L, kv, inst->lclass, cl, offsetnum);
-                    if (inst->lclass->hasconstmembers)
-                        luaR_checkconstassign(L, kv, inst->lclass, cl, offsetnum);
-                }
+                luaR_checkprivateaccessfast(L, kv, inst->lclass, cl, offsetnum);
+                if (LUAU_UNLIKELY(inst->lclass->hasconstmembers))
+                    luaR_checkconstassignfast(L, kv, inst, cl, offsetnum);
                 setobj2class(L, &inst->members[offsetnum], ra);
                 luaC_barrier(L, inst, ra);
-                VM_PATCH_C(pc - 2, offsetnum);
+                patchCachedMemberSlot(pc - 2, offsetnum);
                 return pc;
             }
         }
@@ -788,9 +784,8 @@ const Instruction* executeNAMECALL(lua_State* L, const Instruction* pc, StkId ba
     else if (FFlag::DebugLuauUserDefinedClassesRuntime && ttisobject(rb))
     {
         // Luwu Classes (rfcs/classes.md): the native TRY_OBJECT_NAMECALL_ADDR fast path bails here on a
-        // stale cached slot. Mirror the interpreter's LOP_NAMECALL object handling *and* patch the cached
-        // slot, as executeGETTABLEKS does -- without the patch the slot is never learned under native code,
-        // so every method call on an object re-misses and resolves the name through this fallback.
+        // stale cached slot. Mirror the interpreter's LOP_NAMECALL object handling and patch the cached
+        // slot, as executeGETTABLEKS does.
         uint8_t slot = LUAU_INSN_C(insn);
         LuauObject* inst = objectvalue(rb);
 
@@ -806,15 +801,14 @@ const Instruction* executeNAMECALL(lua_State* L, const Instruction* pc, StkId ba
             offset = uint32_t(nvalue(found));
         }
 
-        if (inst->lclass->hasprivatemembers)
-            luaR_checkprivateaccess(L, kv, inst->lclass, cl, offset);
+        luaR_checkprivateaccessfast(L, kv, inst->lclass, cl, offset);
 
         // note: order of copies allows rb to alias ra+1 or ra
         setobj2s(L, ra + 1, rb);
         setobj2s(L, ra, luaR_lookupmemberatoffset(inst, offset));
 
-        if (offset != slot && offset <= 0xff)
-            VM_PATCH_C(pc - 2, offset);
+        if (offset != slot)
+            patchCachedMemberSlot(pc - 2, offset);
     }
     else
     {
@@ -987,29 +981,26 @@ const Instruction* executeNEWOBJECT(lua_State* L, const Instruction* pc, StkId b
     StkId ra = VM_REG(LUAU_INSN_A(insn));
     StkId classReg = VM_REG(LUAU_INSN_B(insn));
     int form = LUAU_INSN_C(insn);
-    bool custominit = form == 1;
-    bool fieldsform = form == 2;
+    bool custominit = form == LBC_NEWOBJECT_INIT;
+    bool fieldsform = form == LBC_NEWOBJECT_FIELDS;
 
-    // The compiler emits this only for a class it resolved statically, but the operand is about to be
-    // dereferenced as a LuauClass, so all of it is re-checked here.
-    if (LUAU_UNLIKELY(
-            !ttisclass(classReg) ||
-            (fieldsform ? classvalue(classReg)->hascustominit && !classvalue(classReg)->hasprimaryinit
-                        : classvalue(classReg)->hascustominit != custominit) ||
-            (!custominit && classvalue(classReg)->haspoddefaultsfn) ||
-            (fieldsform && classvalue(classReg)->numberofinstancemembers != aux)
-        ))
-    {
-        VM_PROTECT_PC();
-        luaG_runerror(L, "attempt to construct a value that is not a class of the expected shape");
-    }
+    // The compiler picked the form from the class's own declaration; asserted, as in the interpreter.
+    LUAU_ASSERT(ttisclass(classReg));
+    LUAU_ASSERT(
+        fieldsform ? !(classvalue(classReg)->hascustominit && !classvalue(classReg)->hasprimaryinit)
+                   : classvalue(classReg)->hascustominit == custominit
+    );
+    LUAU_ASSERT(custominit || !classvalue(classReg)->haspoddefaultsfn);
+    LUAU_ASSERT(!fieldsform || classvalue(classReg)->numberofinstancemembers == aux);
+    // the POD form takes at most one argument; more compile to a call, which raises
+    LUAU_ASSERT(form != LBC_NEWOBJECT_DEFAULT || aux <= 1);
 
     LuauClass* classdef = classvalue(classReg);
 
     // See VM_CASE(LOP_NEWOBJECT): a private constructor is only callable from inside its own class,
     // and NEWOBJECT skips the C constructor frame where luaR_createobject would enforce that. `cl` is
     // the executing closure, which is the code doing the constructing.
-    if (LUAU_UNLIKELY(classdef->hascustominit && classdef->hasprivatemembers))
+    if (LUAU_UNLIKELY(luaR_hasprivateconstructor(classdef)))
     {
         VM_PROTECT_PC();
         luaR_checkprivateconstructor(L, classdef, cl);
@@ -1048,7 +1039,7 @@ const Instruction* executeNEWOBJECT(lua_State* L, const Instruction* pc, StkId b
         setobj2s(L, ra + 1, &classdef->staticmembers[classdef->initoffset - classdef->numberofinstancemembers]);
         setobjectvalue(L, ra + 2, object);
     }
-    else if (form == 2)
+    else if (fieldsform)
     {
         // one value per member in declaration order; nil keeps the member's default
         for (uint32_t idx = 0; idx < aux; idx++)

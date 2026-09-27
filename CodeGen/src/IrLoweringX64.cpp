@@ -54,8 +54,10 @@ IrLoweringX64::IrLoweringX64(LogBuilder* logger, AssemblyBuilderX64& build, Modu
 // class `classReg` (an object's lclass, or a class object directly) without bailing to the
 // interpreter. A member with no access bits is unrestricted. A private/const member takes the fast
 // path only when `classReg == currentClosure->l.p->ownerclass`, which is exactly
-// luaR_closureownsprivateaccess (the class's methods and closures nested in them). For writes, a
-// const member additionally requires the closure to be the class's __init (luaR_closureisinit).
+// luaR_closureownsprivateaccess (the class's methods and closures nested in them). A write passes the
+// object being written as `writtenObject` (noreg for a read); a const member then additionally
+// requires the closure to be the class's __init (luaR_closureisinit) and the object to be the `self`
+// that __init is constructing, which is register 0 of its frame (luaR_checkconstassign).
 // Everything else jumps to `mismatch`, where the interpreter fallback raises the correct error.
 // `slotReg` holds the raw member offset (before it's scaled into a byte address) and must stay live
 // across this call.
@@ -64,10 +66,12 @@ static void emitClassMemberAuthX64(
     IrRegAllocX64& regs,
     RegisterX64 classReg,
     RegisterX64 slotReg,
-    bool isWrite,
+    RegisterX64 writtenObject,
     Label& mismatch
 )
 {
+    bool isWrite = writtenObject != noreg;
+
     // A read also stops on a blocked `__init` (LBC_CLASSMEMBER_INITBLOCKED), which no closure is
     // authorized for; writes never target `__init`, since it is a static member.
     uint8_t restrictBits = isWrite ? (LBC_CLASSMEMBER_PRIVATE | LBC_CLASSMEMBER_CONST) : (LBC_CLASSMEMBER_PRIVATE | LBC_CLASSMEMBER_INITBLOCKED);
@@ -115,6 +119,12 @@ static void emitClassMemberAuthX64(
         build.mov(owner.reg, qword[owner.reg + offsetof(TValue, value.gc)]);
         build.cmp(owner.reg, sClosure);
         build.jcc(ConditionX64::NotEqual, mismatch); // const write from a non-__init method
+
+        // require R0 (the `self` __init is constructing) to be the object being written
+        build.cmp(dword[rBase + offsetof(TValue, tt)], LUA_TOBJECT);
+        build.jcc(ConditionX64::NotEqual, mismatch);
+        build.cmp(qword[rBase + offsetof(TValue, value.gc)], writtenObject);
+        build.jcc(ConditionX64::NotEqual, mismatch); // const write to an object other than __init's own `self`
     }
 
     build.setLabel(authorized);
@@ -2664,13 +2674,14 @@ void IrLoweringX64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
 
         build.mov(lclass.reg, qword[regOp(OP_A(inst)) + offsetof(LuauObject, lclass)]);
 
-        // bounds check: slot must be a valid instance member offset
+        // bounds check: slot must be a valid instance member offset; a static member read through an object
+        // (`obj.method`, not a call) deliberately misses into the fallback, keeping field reads to one check
         build.cmp(dwordReg(slot.reg), dword[lclass.reg + offsetof(LuauClass, numberofinstancemembers)]);
         build.jcc(ConditionX64::AboveEqual, mismatch);
 
-        // authorize private/const access (or bail) instead of unconditionally bailing on any
-        // private/const member -- must run before the key check clobbers lclass.reg below
-        emitClassMemberAuthX64(build, regs, lclass.reg, slot.reg, HAS_OP_E(inst) && uintOp(OP_E(inst)) != 0, mismatch);
+        // authorize private/const access (or bail) -- must run before the key check clobbers lclass.reg below
+        bool isWrite = HAS_OP_E(inst) && uintOp(OP_E(inst)) != 0;
+        emitClassMemberAuthX64(build, regs, lclass.reg, slot.reg, isWrite ? regOp(OP_A(inst)) : noreg, mismatch);
 
         // key check: offsettomember[slot] must name the expected member
         build.mov(key.reg, luauConstantValue(vmConstOp(OP_C(inst))));
@@ -2710,46 +2721,40 @@ void IrLoweringX64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
     }
     case IrCmd::CHECK_CLASS_FIELDS_CONSTRUCTIBLE:
     {
-        // Mirrors the FIELDS-form shape rules in executeNEWOBJECT, narrowed to the member-copy case (see
-        // IrData.h). A private `__init` is tested by its own member flag rather than hasprivatemembers,
-        // which a class with const fields always sets, and is allowed when the executing closure belongs
-        // to the class -- luaR_checkprivateconstructor's rule, read the same way emitClassMemberAuthX64
-        // reads it (native code always runs a Lua closure).
+        // The runtime conditions of executeNEWOBJECT's member-copy case (see IrData.h); the class's shape
+        // is the compiler's guarantee. A custom `__init` here is always a primary constructor. Whether it
+        // is private is read from its own member flag, and a private one is allowed when the executing
+        // closure belongs to the class -- luaR_checkprivateconstructor's rule, read the same way
+        // emitClassMemberAuthX64 reads it (native code always runs a Lua closure).
         Label fresh;
-        Label& fail = getTargetLabel(OP_C(inst), index, fresh);
+        Label& fail = getTargetLabel(OP_B(inst), index, fresh);
         RegisterX64 classReg = regOp(OP_A(inst));
 
-        build.cmp(dword[classReg + offsetof(LuauClass, numberofinstancemembers)], int32_t(uintOp(OP_B(inst))));
-        build.jcc(ConditionX64::NotEqual, fail);
+        // reserved before the first branch: `constructible` rejoins the main line, so a register evicted
+        // after a branch to it would be stored only on the path that skipped it
+        ScopedRegX64 flags{regs, SizeX64::qword};
+        ScopedRegX64 offset{regs, SizeX64::qword};
+
         build.cmp(qword[classReg + offsetof(LuauClass, memberdefaults)], 0);
-        build.jcc(ConditionX64::NotEqual, fail);
-        build.cmp(byte[classReg + offsetof(LuauClass, haspoddefaultsfn)], 0);
         build.jcc(ConditionX64::NotEqual, fail);
 
         Label constructible;
         build.cmp(byte[classReg + offsetof(LuauClass, hascustominit)], 0);
         build.jcc(ConditionX64::Equal, constructible);
 
-        build.cmp(byte[classReg + offsetof(LuauClass, hasprimaryinit)], 0);
-        build.jcc(ConditionX64::Equal, fail);
+        build.mov(flags.reg, qword[classReg + offsetof(LuauClass, memberflags)]);
+        build.mov(dwordReg(offset.reg), dword[classReg + offsetof(LuauClass, initoffset)]);
+        build.test(byte[flags.reg + offset.reg], int8_t(LBC_CLASSMEMBER_PRIVATE));
+        build.jcc(ConditionX64::Zero, constructible);
 
-        {
-            ScopedRegX64 flags{regs, SizeX64::qword};
-            ScopedRegX64 offset{regs, SizeX64::qword};
-            build.mov(flags.reg, qword[classReg + offsetof(LuauClass, memberflags)]);
-            build.mov(dwordReg(offset.reg), dword[classReg + offsetof(LuauClass, initoffset)]);
-            build.test(byte[flags.reg + offset.reg], int8_t(LBC_CLASSMEMBER_PRIVATE));
-            build.jcc(ConditionX64::Zero, constructible);
-
-            // private: only from one of the class's own methods (or a closure nested in one)
-            build.mov(flags.reg, sClosure);
-            build.mov(flags.reg, qword[flags.reg + offsetof(Closure, l.p)]);
-            build.cmp(qword[flags.reg + offsetof(Proto, ownerclass)], classReg);
-            build.jcc(ConditionX64::NotEqual, fail);
-        }
+        // private: only from one of the class's own methods (or a closure nested in one)
+        build.mov(flags.reg, sClosure);
+        build.mov(flags.reg, qword[flags.reg + offsetof(Closure, l.p)]);
+        build.cmp(qword[flags.reg + offsetof(Proto, ownerclass)], classReg);
+        build.jcc(ConditionX64::NotEqual, fail);
 
         build.setLabel(constructible);
-        finalizeTargetLabel(OP_C(inst), index, fresh);
+        finalizeTargetLabel(OP_B(inst), index, fresh);
         break;
     }
     case IrCmd::NEW_OBJECT:
@@ -2785,7 +2790,7 @@ void IrLoweringX64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
 
         // authorize private static-member access (or bail); static access is read-only, so const
         // never restricts it (isWrite = false)
-        emitClassMemberAuthX64(build, regs, regOp(OP_A(inst)), slot.reg, /* isWrite */ false, mismatch);
+        emitClassMemberAuthX64(build, regs, regOp(OP_A(inst)), slot.reg, /* writtenObject */ noreg, mismatch);
 
         // key check: offsettomember[slot] must name the expected member
         build.mov(key.reg, luauConstantValue(vmConstOp(OP_C(inst))));
@@ -2834,7 +2839,7 @@ void IrLoweringX64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
 
         // authorize private method access (or bail); method resolution is a read, so const doesn't
         // restrict it (isWrite = false)
-        emitClassMemberAuthX64(build, regs, lclass.reg, slot.reg, /* isWrite */ false, mismatch);
+        emitClassMemberAuthX64(build, regs, lclass.reg, slot.reg, /* writtenObject */ noreg, mismatch);
 
         // key check: offsettomember[slot] must name the expected member
         build.mov(key.reg, luauConstantValue(vmConstOp(OP_C(inst))));

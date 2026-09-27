@@ -921,7 +921,12 @@ static std::optional<TypeId> deriveNominalRoot(std::optional<TypeId> parent)
     if (!parent)
         return std::nullopt;
 
-    if (const ExternType* parentEtv = get<ExternType>(follow(*parent)))
+    // Every constructor that passes a parent has already checked it is an extern type (a superclass
+    // that isn't one is reported and never reaches here), and nothing re-derives `root` if `parent`
+    // is set later.
+    const ExternType* parentEtv = get<ExternType>(follow(*parent));
+    LUAU_ASSERT(parentEtv);
+    if (parentEtv)
         return parentEtv->root.value_or(*parent);
 
     return std::nullopt;

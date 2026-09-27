@@ -94,6 +94,8 @@ struct TypeChecker2
     TypeContext typeContext = TypeContext::Default;
     std::vector<NotNull<Scope>> stack;
     std::vector<TypeId> functionDeclStack;
+    // The function expressions being visited, innermost last.
+    std::vector<const AstExprFunction*> enclosingFunctions;
 
     DenseHashSet<TypeId> seenTypeFunctionInstances{nullptr};
 
@@ -235,10 +237,21 @@ private:
     void checkPrivatePropertyAccess(TypeId tableTy, const std::string& prop, const Location& location);
     // If the named property is `const` on some user-defined class in tableTy's hierarchy, and
     // `location` falls outside of that class's own `__init` constructor, report an error.
-    void checkConstPropertyAssignment(TypeId tableTy, const std::string& prop, ValueContext context, const Location& location);
+    void checkConstPropertyAssignment(
+        TypeId tableTy,
+        const AstExpr* objectExpr,
+        const std::string& prop,
+        ValueContext context,
+        const Location& location
+    );
+    bool isInitWritingItsSelf(const ExternType* cls, const AstExpr* objectExpr) const;
     // If classTy's `__init` is `private`, and `location` falls outside of that class's own
     // definition block, report an error.
     void checkPrivateConstructorAccess(TypeId classTy, const Location& location);
+    // Luwu Classes (rfcs/classes.md): steers `typeof(Cat)` to `class<Cat>`.
+    void reportClassTypeofSpelling(AstTypeTypeof* ty, const std::string& className, TypeId objectTy);
+    // Luwu Classes (rfcs/classes.md): reports reading `__init` from a class or object; true if it did.
+    bool checkConstructorReadByName(TypeId tableTy, const std::string& prop, ValueContext context, const Location& location);
     PropertyType hasIndexTypeFromType(
         TypeId ty,
         const std::string& prop,

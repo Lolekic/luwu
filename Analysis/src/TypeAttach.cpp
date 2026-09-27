@@ -11,6 +11,7 @@
 #include "Luau/Type.h"
 #include "Luau/TypeFunction.h"
 
+#include <set>
 #include <string>
 
 static char* allocateString(Luau::Allocator& allocator, std::string_view contents)
@@ -91,6 +92,7 @@ class TypeRehydrationVisitor
 {
     std::map<void*, int> seen;
     int count = 0;
+    std::set<const ExternType*> writingArgumentsOf;
 
     bool hasSeen(const void* tv)
     {
@@ -270,6 +272,34 @@ public:
         return Luau::visit(*this, mtv.table->ty);
     }
 
+    // LuwuGenericNominals: a generic class instantiation is written with its type arguments
+    // (`Box<number>`), or the annotation names the uninstantiated class. An argument can lead back
+    // to the same type, so the arguments of a type whose arguments are being written are left out.
+    AstType* externTypeReference(const ExternType& etv, char* name)
+    {
+        const size_t typeCount = etv.instantiatedTypeParams.size();
+        const size_t packCount = etv.instantiatedTypePackParams.size();
+        const bool writeArguments = typeCount + packCount != 0 && writingArgumentsOf.count(&etv) == 0;
+        if (!writeArguments)
+            return allocator->alloc<AstTypeReference>(Location(), std::nullopt, AstName{name}, std::nullopt, Location());
+
+        writingArgumentsOf.insert(&etv);
+
+        AstArray<AstTypeOrPack> parameters;
+        parameters.size = typeCount + packCount;
+        parameters.data = static_cast<AstTypeOrPack*>(allocator->allocate(sizeof(AstTypeOrPack) * parameters.size));
+
+        for (size_t i = 0; i < typeCount; ++i)
+            parameters.data[i] = {Luau::visit(*this, etv.instantiatedTypeParams[i]->ty), {}};
+
+        for (size_t i = 0; i < packCount; ++i)
+            parameters.data[typeCount + i] = {{}, rehydrate(etv.instantiatedTypePackParams[i])};
+
+        writingArgumentsOf.erase(&etv);
+
+        return allocator->alloc<AstTypeReference>(Location(), std::nullopt, AstName{name}, std::nullopt, Location(), true, parameters);
+    }
+
     AstType* operator()(const ExternType& etv)
     {
         RecursionCounter counter(&count);
@@ -277,7 +307,7 @@ public:
         char* name = allocateString(*allocator, etv.name);
 
         if (!options.expandExternTypeProps || hasSeen(&etv) || count > 1)
-            return allocator->alloc<AstTypeReference>(Location(), std::nullopt, AstName{name}, std::nullopt, Location());
+            return externTypeReference(etv, name);
 
         AstArray<AstTableProp> props;
         props.size = countPropEntries(etv.props);
