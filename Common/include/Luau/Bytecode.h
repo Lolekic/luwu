@@ -53,9 +53,24 @@
 // Version 10: Adds LBC_CONSTANT_CLASS_SHAPE and NEWCLASSMEMBER for use with Luau Classes. Experimental.
 // Version 11: Adds CALLFB, CMPPROTO and feedback vector description. Experimental.
 // Version 12: Adds cost function serialized for proto and prepend each proto with size in bytes. Experimental.
-// Version 13: Adds CHECKSELFCLASS, JUMPXISA, NEWOBJECT, GETOBJECTMEMBER and
-//   SETOBJECTMEMBER for Luwu Classes, and constant field defaults and primary constructors
-//   (LBC_CLASSMEMBER_PRIMARYINIT) in LBC_CONSTANT_CLASS_SHAPE. Experimental.
+//
+// Luwu (bytecode versioning): versions 3..12 are loaded as "legacy" Luau bytecode: what upstream Luau up to 0.731 emits, plus
+// LBC_TYPE_SYMNONE and LBF_BUFFER_ISFROZEN, which the mluau-vendored Luau that preceded Luwu emitted under
+// these same numbers. Upstream has since assigned 13 (double-precision vector constants), 14 (FASTPCALL)
+// and 100 (work-in-progress classes); Luwu refuses those by name and never follows upstream's numbering.
+// Legacy class shapes (upstream's experimental classes) are refused: Luwu classes are a different design.
+
+// # Luwu bytecode version history
+// A blob starting with LWBC_MAGIC is Luwu bytecode: LWBC_MAGIC, the Luwu version, the type encoding version,
+// then the version 12 layout above (per-proto size prefix, feedback vector, inlining cost).
+//
+// Version 1: Baseline. Everything legacy version 12 has.
+//
+// Version 200 (WIP, like upstream's 100): in-progress format changes, emitted while their feature flags are on.
+// Moves into the next released version when the feature ships.
+//   Luwu Classes: CHECKSELFCLASS, JUMPXISA, NEWOBJECT, GETOBJECTMEMBER and SETOBJECTMEMBER, per-member flags
+//   and constant field defaults in LBC_CONSTANT_CLASS_SHAPE, LBC_TYPE_CLASS/LBC_TYPE_OBJECT and
+//   LBF_CLASS_ISINSTANCE.
 
 // # Bytecode type information history
 // Version 1: (from bytecode version 4) Type information for function signature. Currently supported.
@@ -570,10 +585,9 @@ enum LuauOpcode
 // Bytecode tags, used internally for bytecode encoded as a string
 enum LuauBytecodeTag
 {
-    // Bytecode version; runtime supports [MIN, MAX], compiler emits TARGET by default but may emit a higher version when flags are enabled
+    // Legacy Luau bytecode version; runtime loads [MIN, MAX]. The Luwu compiler never emits it (see LuwuBytecodeTag).
     LBC_VERSION_MIN = 3,
-    LBC_VERSION_MAX = 13,
-    LBC_VERSION_TARGET = 9,
+    LBC_VERSION_MAX = 12,
     // Type encoding version
     LBC_TYPE_VERSION_MIN = 1,
     LBC_TYPE_VERSION_MAX = 3,
@@ -595,6 +609,27 @@ enum LuauBytecodeTag
     /** WARNING: This must always be last. */
     LBC_CONSTANT__COUNT
 };
+
+// Luwu (bytecode versioning): the header of Luwu bytecode, which the compiler always emits (see "Luwu bytecode version history").
+enum LuwuBytecodeTag
+{
+    // First byte of a Luwu blob. Upstream versions are counted up from 1 and 0 marks a compile error.
+    LWBC_MAGIC = 0xff,
+    // Released Luwu versions the runtime loads; the compiler emits TARGET
+    LWBC_VERSION_MIN = 1,
+    LWBC_VERSION_MAX = 1,
+    LWBC_VERSION_TARGET = 1,
+    // In-progress format changes, emitted while their feature flags are on
+    LWBC_VERSION_WIP = 200,
+    // LWBC_MAGIC, the Luwu version and the type encoding version
+    LWBC_HEADER_SIZE = 3,
+};
+
+// Luwu (bytecode versioning): the last opcode, builtin id and type tag legacy (upstream-numbered) bytecode may use; anything past
+// them comes from a newer upstream Luau or from Luwu's own additions, which only Luwu bytecode carries.
+#define LBC_LEGACY_LAST_OPCODE LOP_CMPPROTO
+#define LBC_LEGACY_LAST_BUILTIN LBF_BUFFER_ISFROZEN
+#define LBC_LEGACY_LAST_TYPE LBC_TYPE_SYMNONE
 
 // Luwu Classes (rfcs/classes.md): per-member attribute bits serialized as part of
 // LBC_CONSTANT_CLASS_SHAPE. The single source of truth for these bits; both the compiler

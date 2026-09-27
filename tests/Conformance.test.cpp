@@ -85,6 +85,7 @@ LUAU_FASTFLAG(LuauCodegenFixTwoResA64Builtin)
 LUAU_FASTFLAG(LuauMathRoundNegZero)
 LUAU_FASTFLAG(LuwuDefaultArguments)
 LUAU_FASTFLAG(LuwuNonePrimitive)
+LUAU_FASTFLAG(LuwuBufferIsFrozen)
 LUAU_FASTFLAG(LuauDirectFieldGet)
 LUAU_FASTFLAG(LuwuPcallMulti)
 
@@ -6044,6 +6045,118 @@ TEST_CASE("UserThreadStateChange")
     CHECK(cbState.called);
     CHECK(cbState.status == LUA_OK);
     CHECK(cbState.topString == "");
+}
+
+// Luwu (bytecode versioning): rewrites a Luwu blob's header as legacy Luau bytecode version 12, whose layout Luwu bytecode shares
+static std::string asLegacyBytecode(std::string bytecode)
+{
+    REQUIRE(bytecode.size() > LWBC_HEADER_SIZE);
+    REQUIRE(uint8_t(bytecode[0]) == LWBC_MAGIC);
+    return char(LBC_VERSION_MAX) + bytecode.substr(2);
+}
+
+// Returns the load error for `bytecode`, or an empty string when it loads
+static std::string getLoadError(const std::string& bytecode)
+{
+    StateRef globalState(luaL_newstate(), lua_close);
+    lua_State* L = globalState.get();
+
+    if (luau_load(L, "=bytecode", bytecode.data(), bytecode.size(), 0) == 0)
+        return "";
+
+    const char* error = lua_tostring(L, -1);
+    return error ? error : "(no message)";
+}
+
+static bool contains(const std::string& haystack, const std::string& needle)
+{
+    return haystack.find(needle) != std::string::npos;
+}
+
+TEST_CASE("LuwuBytecodeHeader")
+{
+    std::string bytecode = Luau::compile("return 1");
+    REQUIRE(bytecode.size() > LWBC_HEADER_SIZE);
+    CHECK(uint8_t(bytecode[0]) == LWBC_MAGIC);
+    CHECK(uint8_t(bytecode[1]) == LWBC_VERSION_TARGET);
+    CHECK(getLoadError(bytecode) == "");
+
+    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
+    std::string wip = Luau::compile("return 1");
+    REQUIRE(wip.size() > LWBC_HEADER_SIZE);
+    CHECK(uint8_t(wip[1]) == LWBC_VERSION_WIP);
+    CHECK(getLoadError(wip) == "");
+
+    wip[1] = char(LWBC_VERSION_MAX + 1);
+    CHECK(contains(getLoadError(wip), "Luwu bytecode version 2 is newer than this Luwu loads"));
+}
+
+TEST_CASE("LegacyBytecodeLoadsWithMluauAdditions")
+{
+    // The mluau-vendored Luau that preceded Luwu emitted LBF_BUFFER_ISFROZEN and LBC_TYPE_SYMNONE under legacy
+    // version numbers, so legacy bytecode containing them keeps loading
+    ScopedFastFlag isfrozen{FFlag::LuwuBufferIsFrozen, true};
+
+    Luau::CompileOptions options;
+    options.optimizationLevel = 1;
+    options.typeInfoLevel = 1;
+
+    Luau::BytecodeBuilder bcb;
+    bcb.setDumpFlags(Luau::BytecodeBuilder::Dump_Code);
+    Luau::compileOrThrow(bcb, "local function f(x: none, b: buffer) return buffer.isfrozen(b) end return f", options);
+
+    // the blob really carries the builtin, or this proves nothing
+    CHECK(contains(bcb.dumpEverything(), "FASTCALL1 " + std::to_string(LBF_BUFFER_ISFROZEN) + " "));
+    CHECK(getLoadError(asLegacyBytecode(bcb.getBytecode())) == "");
+
+    // the same function typed with a Luwu-only tag is refused, so the parameter's tag really is in the blob
+    std::string object = asLegacyBytecode(Luau::compile("local function f(x: object, b: buffer) return buffer.isfrozen(b) end return f", options));
+    CHECK(contains(getLoadError(object), "uses type tag " + std::to_string(LBC_TYPE_OBJECT)));
+}
+
+TEST_CASE("LegacyBytecodeRefusesLuwuAdditions")
+{
+    ScopedFastFlag sffs[] = {
+        {FFlag::DebugLuauUserDefinedClasses, true},
+        {FFlag::DebugLuauUserDefinedClassesRuntime, true},
+        {FFlag::LuwuBetterUserDefinedClasses, true},
+    };
+
+    Luau::CompileOptions options;
+    options.optimizationLevel = 1;
+
+    // a builtin past LBC_LEGACY_LAST_BUILTIN
+    std::string builtin = asLegacyBytecode(Luau::compile("local a, b = ... return class.isinstance(a, b)", options));
+    CHECK(contains(getLoadError(builtin), "uses builtin function id " + std::to_string(LBF_CLASS_ISINSTANCE)));
+
+    // an opcode past LBC_LEGACY_LAST_OPCODE
+    std::string opcode = asLegacyBytecode(Luau::compile("class A x: number = 1 end local a = A() return a", options));
+    CHECK(contains(getLoadError(opcode), "uses opcode"));
+
+    // a class shape, whatever its layout
+    std::string shape = asLegacyBytecode(Luau::compile("class A end return A", options));
+    CHECK(contains(getLoadError(shape), "contains classes"));
+}
+
+TEST_CASE("UpstreamOnlyBytecodeVersionsAreNamed")
+{
+    std::string bytecode = Luau::compile("return 1");
+    REQUIRE(bytecode.size() > LWBC_HEADER_SIZE);
+
+    bytecode[0] = char(13);
+    CHECK(contains(getLoadError(bytecode), "Luau bytecode version 13 (double-precision vector constants) comes from a newer upstream Luau"));
+
+    bytecode[0] = char(14);
+    CHECK(contains(getLoadError(bytecode), "(FASTPCALL)"));
+
+    bytecode[0] = char(100);
+    CHECK(contains(getLoadError(bytecode), "(upstream Luau's work-in-progress classes)"));
+
+    bytecode[0] = char(50);
+    CHECK(contains(getLoadError(bytecode), "Luau bytecode version 50 comes from a newer upstream Luau"));
+
+    bytecode[0] = char(2);
+    CHECK(contains(getLoadError(bytecode), "bytecode version mismatch (expected [3..12] or Luwu bytecode, got 2)"));
 }
 
 TEST_SUITE_END();

@@ -236,6 +236,15 @@ TEST_CASE("BytecodeIsStable")
     // Bytecode type encoding (serialized & in-memory)
     // Note: these *can* change retroactively *if* type version is bumped, but probably shouldn't
     LUAU_ASSERT(LBC_TYPE_BUFFER == 9); // type version 1
+
+    // Luwu (bytecode versioning): the mluau-vendored Luau that preceded Luwu emitted these under legacy version numbers, so legacy
+    // bytecode that is loaded today can contain them (see "Luwu bytecode version history" in Bytecode.h)
+    CHECK(LBF_BUFFER_ISFROZEN == 133);
+    CHECK(LBC_TYPE_SYMNONE == 11);
+
+    // Luwu (bytecode versioning): the header of Luwu bytecode
+    CHECK(LWBC_MAGIC == 0xff);
+    CHECK(LWBC_VERSION_WIP == 200);
 }
 
 TEST_CASE("CompileToBytecode")

@@ -12,13 +12,12 @@ LUAU_FASTFLAG(LuauIntegerType2)
 LUAU_FASTFLAG(DebugLuauUserDefinedClasses)
 LUAU_FASTFLAG(LuauEmitCallFeedback)
 LUAU_FASTFLAGVARIABLE(LuauVirtualBcBuilder)
-LUAU_FASTFLAGVARIABLE(LuauBytecodeCostModel)
 
 namespace Luau
 {
 
-static_assert(LBC_VERSION_TARGET >= LBC_VERSION_MIN && LBC_VERSION_TARGET <= LBC_VERSION_MAX, "Invalid bytecode version setup");
-static_assert(LBC_VERSION_MAX <= 127, "Bytecode version should be 7-bit so that we can extend the serialization to use varint transparently");
+static_assert(LWBC_VERSION_TARGET >= LWBC_VERSION_MIN && LWBC_VERSION_TARGET <= LWBC_VERSION_MAX, "Invalid bytecode version setup");
+static_assert(LWBC_VERSION_WIP > LWBC_VERSION_MAX && LWBC_VERSION_WIP < LWBC_MAGIC, "Invalid bytecode version setup");
 
 static const uint32_t kMaxConstantCount = 1 << 23;
 static const uint32_t kMaxClosureCount = 1 << 15;
@@ -760,9 +759,11 @@ void BytecodeBuilder::finalize()
 
     // assemble final bytecode blob
     uint8_t version = getVersion();
-    LUAU_ASSERT(version >= LBC_VERSION_MIN && version <= LBC_VERSION_MAX);
+    LUAU_ASSERT((version >= LWBC_VERSION_MIN && version <= LWBC_VERSION_MAX) || version == LWBC_VERSION_WIP);
 
-    bytecode = char(version);
+    // Luwu (bytecode versioning): upstream writes its own version number here; see "Luwu bytecode version history" in Bytecode.h
+    bytecode = char(LWBC_MAGIC);
+    writeByte(bytecode, version);
 
     uint8_t typesversion = getTypeEncodingVersion();
     LUAU_ASSERT(typesversion >= LBC_TYPE_VERSION_MIN && typesversion <= LBC_TYPE_VERSION_MAX);
@@ -789,8 +790,8 @@ void BytecodeBuilder::finalize()
 
     for (const Function& func : functions)
     {
-        if (FFlag::LuauBytecodeCostModel)
-            writeVarInt(bytecode, func.data.size());
+        // Luwu (bytecode versioning): every Luwu version has the version 12 layout, so this is unconditional (upstream: only at version 12)
+        writeVarInt(bytecode, func.data.size());
         bytecode += func.data;
     }
 
@@ -1005,23 +1006,17 @@ void BytecodeBuilder::writeFunction(std::string& ss, uint32_t id, uint8_t flags,
         writeByte(ss, 0);
     }
 
-    if (FFlag::LuauEmitCallFeedback)
+    // Luwu (bytecode versioning): the feedback vector and the inlining cost are always written, since every Luwu version has the
+    // version 12 layout (upstream writes each only when the flag that picks versions 11 and 12 is on)
+    writeVarInt(ss, fbSlots.size());
+    for (uint32_t pc : fbSlots)
     {
-        // Feedback Slots
-        writeVarInt(ss, fbSlots.size());
-        for (uint32_t pc : fbSlots)
-        {
-            writeByte(ss, LFT_CALLTARGET);
-            writeVarInt(ss, pc);
-        }
+        writeByte(ss, LFT_CALLTARGET);
+        writeVarInt(ss, pc);
     }
 
-    if (FFlag::LuauBytecodeCostModel && (flags & LPF_INLINABLE) != 0)
-    {
-        if (!FFlag::LuauEmitCallFeedback)
-            writeVarInt(ss, 0);
+    if ((flags & LPF_INLINABLE) != 0)
         writeVarInt(ss, cost);
-    }
 }
 
 void BytecodeBuilder::writeClassShape(std::string& ss, const ClassShape& cs) const
@@ -1468,7 +1463,7 @@ std::vector<uint32_t> BytecodeBuilder::expandJumps()
 
 std::string BytecodeBuilder::getError(const std::string& message)
 {
-    // 0 acts as a special marker for error bytecode (it's equal to LBC_VERSION_TARGET for valid bytecode blobs)
+    // 0 acts as a special marker for error bytecode (valid blobs start with LWBC_MAGIC)
     std::string result;
     result += char(0);
     result += message;
@@ -1478,15 +1473,11 @@ std::string BytecodeBuilder::getError(const std::string& message)
 
 uint8_t BytecodeBuilder::getVersion()
 {
-    if (FFlag::LuauBytecodeCostModel)
-        return 12;
-    if (FFlag::LuauEmitCallFeedback)
-        return 11;
-
+    // Luwu Classes (rfcs/classes/classes.md): class bytecode is still a work-in-progress format
     if (FFlag::DebugLuauUserDefinedClasses)
-        return 10;
+        return LWBC_VERSION_WIP;
 
-    return LBC_VERSION_TARGET;
+    return LWBC_VERSION_TARGET;
 }
 
 uint8_t BytecodeBuilder::getTypeEncodingVersion()

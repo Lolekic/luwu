@@ -165,7 +165,7 @@ struct BytecodeInlinerFixture
     {
         std::string bytecode = bcb.getBytecode();
         const char* data = bytecode.data();
-        size_t offset = 2; // skip versions
+        size_t offset = LWBC_HEADER_SIZE; // skip the Luwu header
         std::vector<std::string> result;
         uint32_t stringsCount = readVarInt(data, offset);
         for (uint32_t i = 0; i < stringsCount; i++)
