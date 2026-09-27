@@ -651,8 +651,10 @@ struct TypeMapVisitor : AstVisitor
                 {
                     // Luwu Classes (rfcs/classes): a class-typed initializer is propagated only to a local that
                     // is never written; the type covers the whole range and codegen guards it with a VM exit.
+                    // That includes a construction (`Cat()`), whose result is typed `object`.
                     const AstType** typePtr = resolvedExprs.find(node->values.data[i]);
-                    bool skipClassTypeOfWrittenLocal = typePtr && namesClass(*typePtr) && isWritten(var);
+                    bool isClassType = typePtr && (namesClass(*typePtr) || *typePtr == &builtinTypes.objectType);
+                    bool skipClassTypeOfWrittenLocal = isClassType && isWritten(var);
                     if (typePtr && !skipClassTypeOfWrittenLocal)
                         resolvedLocals[var] = *typePtr;
                 }

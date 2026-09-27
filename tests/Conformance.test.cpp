@@ -34,6 +34,17 @@
 #include <vector>
 #include <math.h>
 
+#ifndef __has_feature
+#define __has_feature(x) 0
+#endif
+
+#if __has_feature(address_sanitizer) || defined(__SANITIZE_ADDRESS__) || defined(LUAU_ENABLE_ASAN)
+#include <sanitizer/asan_interface.h>
+#define LUWU_TESTS_HAVE_ASAN 1
+#else
+#define LUWU_TESTS_HAVE_ASAN 0
+#endif
+
 #include <sys/stat.h>
 #ifdef _WIN32
 #include <direct.h>
@@ -5435,6 +5446,15 @@ Yielder_ = Yielder
         struct Quarantine
         {
             std::vector<void*> freed;
+
+            // Under ASAN the VM poisons a page's unused blocks and hands the page back still poisoned
+            static void scribble(void* ptr, size_t size)
+            {
+#if LUWU_TESTS_HAVE_ASAN
+                __asan_unpoison_memory_region(ptr, size);
+#endif
+                memset(ptr, 0xab, size);
+            }
         };
 
         lua_Alloc alloc = [](void* ud, void* ptr, size_t osize, size_t nsize) -> void*
@@ -5445,7 +5465,7 @@ Yielder_ = Yielder
             {
                 if (ptr)
                 {
-                    memset(ptr, 0xab, osize);
+                    Quarantine::scribble(ptr, osize);
                     quarantine->freed.push_back(ptr);
                 }
                 return nullptr;
@@ -5455,7 +5475,7 @@ Yielder_ = Yielder
             if (result && ptr)
             {
                 memcpy(result, ptr, osize < nsize ? osize : nsize);
-                memset(ptr, 0xab, osize);
+                Quarantine::scribble(ptr, osize);
                 quarantine->freed.push_back(ptr);
             }
             return result;

@@ -5002,7 +5002,7 @@ TEST_CASE_FIXTURE(Fixture, "class_extends_is_rejected")
     )");
 
     REQUIRE_EQ(result.errors.size(), 2);
-    CHECK_EQ(result.errors[0].getMessage(), "Luwu classes don't support inheritance ('extends'); hold the other class in a field and forward to it instead");
+    CHECK_EQ(result.errors[0].getMessage(), "Luwu classes don't support classical inheritance ('extends'); consider composing your classes (holding an object of another class in your class) or waiting for Luwu traits");
     CHECK_EQ(result.errors[0].getLocation().begin.line, 2);
     CHECK_EQ(result.errors[1].getLocation().begin.line, 3);
 

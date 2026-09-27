@@ -1876,7 +1876,8 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
 
         report(
             Location(extendsLocation, baseLocation),
-            "Luwu classes don't support classic inheritance ('extends'); consider composing your classes (holding another class in your class)"
+            "Luwu classes don't support classical inheritance ('extends'); consider composing your classes (holding an object of another "
+            "class in your class) or waiting for Luwu traits"
         );
     };
 
