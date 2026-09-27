@@ -29,7 +29,7 @@ LUAU_FASTFLAG(LuauCompileIifeInline)
 LUAU_FASTFLAG(LuauIntegerBufferFastcalls)
 LUAU_FASTFLAG(LuauCompileStringInterpTargetTop)
 LUAU_FASTFLAG(LuauExportValueSyntax)
-LUAU_FASTFLAG(LuauExportedClassIsNilWorkaround)
+LUAU_FASTFLAG(LuwuExportedClassIsNilWorkaround)
 LUAU_FASTFLAG(DebugLuauNoInline)
 LUAU_FASTFLAG(LuauEmitCallFeedback)
 LUAU_FASTFLAG(LuwuDefaultArguments)
@@ -11174,10 +11174,11 @@ TEST_CASE("ClassTypedLocalRangeStartsAfterInitializer")
     ScopedFastFlag genericNominals{FFlag::LuwuGenericNominals, true};
     ScopedFastFlag noCallFb{FFlag::LuauEmitCallFeedback, false};
 
-    // `local box: Box<number> = Box.make()` evaluates `Box.make` in the local's own register, so that register
-    // holds the class, then the function, before it ever holds the object. Codegen trusts a declared register
-    // type over what it computes and guards it with a VM exit, so a range starting at the register's allocation
-    // exits at the GETTABLEKS on every run. The declared range has to start where the initializer finishes.
+    // `local box: Box<number> = Box.make()` evaluates `Box.make` in the local's own register. That register
+    // holds the class, then the function, and only then the object. Codegen trusts a declared register type
+    // over the type it computes, and guards it with a VM exit. So if the declared range started where the
+    // register is allocated, the guard would exit at the GETTABLEKS on every run. The declared range has to
+    // start where the initializer finishes.
     const char* source = R"(
 class Box<T>
     public value: T
@@ -11439,13 +11440,17 @@ TEST_CASE("ClassIsinstanceProofIsBoundedByTheBranchItGuards")
     ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
     ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
 
-    // The isinstance proof elides the inline site's CHECKSELFCLASS, so a write that could reach a use
-    // inside the branch would leave an inlined body reading constant field offsets off the wrong value.
-    // The proof lives exactly as long as the then-body it guards, so what has to be excluded is a write
-    // the proof cannot see coming: one inside that body, or one from a nested function (which runs
-    // whenever the closure is called). Writes elsewhere in the enclosing function cannot invalidate it --
-    // one before the branch happened before JUMPXISA tested the current value, and one after cannot
-    // reach a use inside.
+    // A class.isinstance proof removes the inline site's CHECKSELFCLASS. If a write could replace the
+    // local before a use inside the branch, the inlined body would read constant field offsets off the
+    // wrong value.
+    //
+    // The proof covers only the then-body it guards. Two kinds of write can reach a use inside it, and
+    // each must cancel the proof:
+    // - a write inside the then-body;
+    // - a write from a nested function, which runs whenever the closure is called.
+    //
+    // Other writes in the enclosing function cannot invalidate the proof. A write before the branch
+    // happened before JUMPXISA tested the value, and a write after the branch cannot reach a use inside it.
     const char* source = R"(
 class Cat(public name: string)
     public function meow(self): string
@@ -11549,20 +11554,24 @@ end
 
     Luau::compileOrThrow(bcb, source, options);
 
-    // 0 is meow; 3 and 5 are the two nested closures (protos are emitted innermost first), so 4 is
-    // writeFromClosure and 6 writeFromOuterClosure.
+    // Function indices: 0 is meow. Protos are emitted innermost first, so 3 and 5 are the two nested
+    // closures, 4 is writeFromClosure and 6 is writeFromOuterClosure.
     //
-    // Writes the proof cannot see coming: inside the branch (1), inside a loop in the branch whose second
-    // iteration would see it (2), from a closure declared in the branch (4), from one declared *outside*
-    // it and called inside (6) -- only Variable::writtenByNestedFunction rules that one out, since the
-    // assignment is not in the region -- and a copy into a local carrying only a `Cat?` annotation, which
-    // is not evidence of anything (7).
+    // These functions have a write the proof cannot see coming, so each must keep its NAMECALL:
+    // - 1: a write inside the branch.
+    // - 2: a write inside a loop in the branch. The loop's second iteration would see it.
+    // - 4: a write from a closure declared inside the branch.
+    // - 6: a write from a closure declared outside the branch and called inside it. The assignment is
+    //   not in the branch, so only Variable::writtenByNestedFunction rules this one out.
+    // - 7: a copy into a local annotated `Cat?`. The annotation alone is not evidence of anything.
     for (int f : {1, 2, 4, 6, 7})
         CHECK_MESSAGE(bcb.dumpFunction(f).find("NAMECALL") != std::string::npos, "function " << f << " inlined past a write it cannot see");
 
-    // Writes that cannot reach a use inside the branch: after it (8), before it (9), and outside the
-    // branch but inside an enclosing loop (10) -- there the check re-runs on every iteration. All inline
-    // with no check of their own, and 8 reads a field at a constant offset too.
+    // These writes cannot reach a use inside the branch, so each function inlines with no check of its own:
+    // - 8: a write after the branch.
+    // - 9: a write before the branch.
+    // - 10: a write outside the branch but inside an enclosing loop. The check re-runs on every iteration.
+    // 8 also reads a field (`c.name`) at a constant offset.
     for (int f : {8, 9, 10})
     {
         std::string code = bcb.dumpFunction(f);
@@ -11578,10 +11587,13 @@ TEST_CASE("ClassAssertIsinstanceProvesTheRestOfTheBlock")
     ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
     ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
 
-    // `assert(class.isinstance(c, C))` raises on a falsy condition, so every path that reaches the
-    // following statements passed the same runtime check JUMPXISA performs -- it proves `c` for the rest
-    // of the block just as a branch proves it for its body, elided CHECKSELFCLASS included. The region is
-    // the statements after the assert, so the same two kinds of write refuse it.
+    // `assert(class.isinstance(c, C))` raises when the check fails. So every path that reaches the
+    // statements after it passed the same runtime check JUMPXISA performs. The assert therefore proves `c`
+    // for the rest of the block, the way a branch proves it for its body, and the inline site's
+    // CHECKSELFCLASS is dropped the same way.
+    //
+    // The proven region is the statements after the assert. The same two kinds of write that cancel a
+    // branch's proof cancel this one: a write inside the region, and a write from a nested function.
     const char* source = R"(
 class Cat(public name: string)
     public function meow(self): string
@@ -11787,11 +11799,11 @@ TEST_CASE("ClassAssertIsinstanceFusesIntoJumpxisa")
     ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
     ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
 
-    // `assert(class.isinstance(x, C))` is how code opts into the proven receiver tier, so it lands in hot
-    // paths and must cost what the `if` form costs: a JUMPXISA over the assert, not two builtin call
-    // sequences. The call stays behind the jump so a failure raises exactly as written -- assert's own
-    // message, a custom one, and the right line -- which is also why the operands have to be safe to read
-    // twice.
+    // `assert(class.isinstance(x, C))` is how code opts into the proven receiver tier, so it ends up in hot
+    // paths. It must cost what the `if` form costs: one JUMPXISA over the assert, not two builtin call
+    // sequences. The assert call stays behind the jump, so a failure raises exactly as written, with
+    // assert's own message or the custom one, on the right line. The operands are read once by JUMPXISA and
+    // again by the assert call when the check fails, so they must be safe to read twice.
     const char* source = R"(
 class Vec(public x: number)
     public function get(self): number
@@ -12034,9 +12046,9 @@ TEST_CASE("ClassPrimaryConstructorFieldsFormInsideAnotherClass")
     ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
     ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
 
-    // Constructing a class inside another class's method runs its initializers with that class's private
-    // access if they are compiled at the site, so one that names a member private to the site's class
-    // keeps the `__init` call.
+    // Spy is constructed inside a Vault method. If Spy's initializers were compiled at that construction
+    // site, they would run with Vault's private access. So an initializer that names a member private to
+    // the site's class (`c.secret`, private to Vault) keeps the `__init` call.
     const char* source = R"(
 class Spy(public c)
     public stolen = c.secret
@@ -12091,10 +12103,13 @@ TEST_CASE("ClassAssertIsinstanceFailurePathRaises")
     ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
     ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
 
-    // rfcs/classes.md: the region after a fused `assert(class.isinstance(...))` is proven, so the failing
-    // path must not reach it even when the environment's `assert` returns: the assert call is followed by
-    // a second check that raises. A message with side effects is evaluated even when the check passes, so
-    // that form isn't fused at all.
+    // rfcs/classes.md: the code after a fused `assert(class.isinstance(...))` is proven, so a failed check
+    // must never reach it. That has to hold even when `assert` has been replaced, through the environment,
+    // by a function that returns instead of raising. So the assert call is followed by a second check that
+    // raises.
+    //
+    // A message with side effects is evaluated even when the check passes, so an assert with such a message
+    // is not fused at all.
     const char* source = R"(
 class Vec(public x: number)
 end
@@ -12225,9 +12240,11 @@ TEST_CASE("ClassMethodPassingObjectsToPodConstructionKeepsItsCall")
     ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
 
     // rfcs/classes.md: a POD constructor reads an object argument's fields with the private access of the
-    // nearest Lua frame, which is the caller's once the body is inlined. So a body of a class with private
-    // members that may hand an object to a POD construction -- directly, or through a C function like
-    // `pcall` -- keeps its call outside the class. A table argument can't be an object and still inlines.
+    // nearest Lua frame. Once a method body is inlined, that frame is the caller's.
+    // So consider a method of a class with private members whose body may hand an object to a POD
+    // construction, either directly or through a C function like `pcall`. Called from outside the class,
+    // that method keeps its call. A method that passes a table still inlines, since a table can't be an
+    // object.
     const char* source = R"(
 class Bag
     public token: string
@@ -12380,9 +12397,13 @@ TEST_CASE("ClassInliningGainsNothingFromDeclarationsOrFields")
     ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
     ScopedFastFlag trustAnnotations{FFlag::DebugLuwuCompilerTrustsTypeAnnotations, true};
 
-    // Inlined into a Dog method, a Cat method runs with Dog's private access. A declared table type on Cat's
-    // field doesn't make what it holds safe to hand to a POD construction there (a lie would gain access), and
-    // `self:cb()` reaches a method only if the class has one by that name; a field holding a POD class isn't.
+    // Inlined into a Dog method, a Cat method runs with Dog's private access. So these two Cat methods
+    // must keep their call when Dog calls them:
+    // - `copy` passes `self.inner` to a POD construction. The field's declared table type does not make
+    //   that safe. If the annotation lies and the field holds an object, the construction reads that
+    //   object's private fields with Dog's access.
+    // - `viaField` calls `self:cb()`. That call reaches a method only when the class has a method named
+    //   `cb`. Here `cb` is a field holding the POD class `Bag`, so the call is a POD construction.
     const char* source = R"(
 class Bag
     public token: string = "none"
@@ -12771,13 +12792,14 @@ TEST_CASE("ClassMethodInlineNoRecursion")
     // `self:pong(...)` stays a plain CALL in this dump
     ScopedFastFlag noCallFb{FFlag::LuauEmitCallFeedback, false};
 
-    // A method that calls itself (directly or mutually with a sibling method) must never get
-    // inlined into its own body: tryResolveMethodCall resolves `self:method()` to the very
-    // AstExprFunction currently being compiled, but that function's Function record (canInline,
-    // cost model) is only registered in `functions` once its own compilation finishes -- so `fi`
-    // is null while we're still inside it, and the general "don't inline into an unregistered
-    // function" guard (shared with plain function recursion, see InlineProhibitedRecursion) keeps
-    // the recursive call as a real CALL/CALLM instead of splicing the body into itself.
+    // A method that calls itself, directly or through a sibling method, must never be inlined into
+    // its own body.
+    //
+    // tryResolveMethodCall resolves `self:method()` to the AstExprFunction that is being compiled.
+    // That function's Function record (canInline, cost model) is only registered in `functions` once
+    // its compilation finishes, so `fi` is null while its body is being compiled. The general "don't
+    // inline into an unregistered function" guard then keeps the recursive call a real CALL/CALLM.
+    // Plain function recursion relies on the same guard (see InlineProhibitedRecursion).
     CHECK_EQ(
         compileWithRemarks(R"(
 class Fact
@@ -12801,12 +12823,12 @@ end
 )"
     );
 
-    // Mutual recursion between two sibling methods is not itself prohibited -- `ping` is fully
-    // registered by the time `pong` is compiled, so `pong`'s call to `self:ping(...)` is free to
-    // inline (and does) -- but that's fine: it's one-shot, not a cycle. The call to `pong` inside
-    // `ping`'s own body can't inline `pong` back (pong isn't registered yet, still mid-compile),
-    // and the freshly-inlined copy of `ping` spliced into `pong` still calls the *real* `pong`
-    // (itself, mid-compile, still unregistered) rather than re-inlining -- so there is no cycle.
+    // Mutual recursion between two sibling methods may inline once, but it can never cycle:
+    // - `ping` is fully registered by the time `pong` is compiled, so `pong`'s call to `self:ping(...)`
+    //   inlines.
+    // - `ping`'s own call to `self:pong(...)` can't inline, because `pong` isn't registered yet.
+    // - The copy of `ping` inlined into `pong` calls `self:pong(...)`. That is the real `pong`, which is
+    //   still being compiled and still unregistered, so the call stays a call instead of inlining again.
     CHECK_EQ(
         compileWithRemarks(R"(
 class Ping
@@ -12847,10 +12869,10 @@ end
 )"
     );
 
-    // Confirm the shape directly: `pong`'s own bytecode gets `ping`'s body spliced in (the
-    // `n <= 0` guard appears twice), but the nested `self:pong(...)` call inside that inlined
-    // copy is a genuine NAMECALL/CALL to the real (unregistered, mid-compile) pong -- not another
-    // level of inlining, so the mutual recursion can never blow up the compiler.
+    // Check the bytecode directly. `pong` contains `ping`'s inlined body (the `n <= 0` guard appears
+    // twice). The `self:pong(...)` call inside that copy is a real NAMECALL/CALL to `pong`, which is
+    // still being compiled and unregistered. It is not another level of inlining, so mutual recursion
+    // can never blow up the compiler.
     CHECK_EQ(
         "\n" + compileFunction(
                    R"(
@@ -13829,7 +13851,7 @@ TEST_CASE("ExportClass")
         {FFlag::LuauExportValueSyntax, true},
         {FFlag::DebugLuauUserDefinedClasses, true},
         {FFlag::LuwuBetterUserDefinedClasses, true},
-        {FFlag::LuauExportedClassIsNilWorkaround, false},
+        {FFlag::LuwuExportedClassIsNilWorkaround, false},
     };
 
     CHECK_EQ(
@@ -14020,11 +14042,13 @@ TEST_CASE("ClassTypeHintsSeeClassesDeclaredLater")
     ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
     ScopedFastFlag genericNominals{FFlag::LuwuGenericNominals, true};
 
-    // Classes hoist, so code above a declaration sees the class. A `Cat` annotation there is an object, not the
-    // host-userdata guess an unknown type name gets: that guess becomes an entry guard every real argument
-    // fails. A construction (`Cat()`) is an object. A static call declared to return a class (`Cat.new()`) is one
-    // only when annotations are trusted, and never when the return type is optional or is a generic (of the class
-    // or the method) spelled like a class.
+    // Classes hoist, so code above a class's declaration can name it. The type hints checked here:
+    // - A `Cat` annotation above the declaration (`before`) is `object`. It must not get the host-userdata
+    //   guess an unknown type name gets, because that guess becomes an entry guard every real argument fails.
+    // - A construction (`Cat()`) is `object`.
+    // - A static call declared to return a class (`Cat.new()`) is `object` only when annotations are trusted.
+    // - It stays `any` when the declared return type is optional (`Cat.maybe()`), or when it is a generic that
+    //   happens to be spelled like the class: the class's own generic (`Box.get()`) or the method's (`Cat.pick()`).
     const char* source = R"(
 local function before(c: Cat) return c.x end
 local function f()

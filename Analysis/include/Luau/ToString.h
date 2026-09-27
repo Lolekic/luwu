@@ -53,13 +53,13 @@ struct ToStringOptions
     // expansion of each named type (table/union/intersection/function alias) referenced (but not
     // itself the root) while printing this type, e.g. "where Metadata = { ... }".
     bool includeWhereClauses = false;
-    // If true, a named TableType/MetatableType at the *root* of a toStringDetailed call expands to
-    // its structure instead of short-circuiting to its own name (union/intersection/function types
-    // already behave this way unconditionally - see TypeStringifier's per-Type operator()
-    // overloads). Off by default so existing callers that want the compact `Alias<T>`-style root
-    // display (e.g. hovering a type alias declaration itself) are unaffected; turn this on for
-    // callers that are instead displaying the type of a *value* (a hover over a variable, say),
-    // where showing the alias's own name back at the reader (`const fs: fs.fs`) is useless.
+    // If true, a named TableType/MetatableType at the *root* of a toStringDetailed call is expanded to
+    // its structure instead of printing just its name. Union, intersection and function types at the
+    // root are always expanded (see TypeStringifier's per-Type operator() overloads).
+    // Off by default, for callers that want the compact `Alias<T>` form at the root, such as a hover
+    // over a type alias declaration. Turn it on for callers that display the type of a *value*, such
+    // as a hover over a variable. There, printing the alias's own name back (`const fs: fs.fs`) tells
+    // the reader nothing.
     bool alwaysExpandRootAlias = false;
     size_t maxTableLength = size_t(FInt::LuauTableTypeMaximumStringifierLength); // Only applied to TableTypes
     size_t maxTypeLength = size_t(FInt::LuauTypeMaximumStringifierLength);

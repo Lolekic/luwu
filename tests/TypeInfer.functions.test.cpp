@@ -63,7 +63,7 @@ TEST_CASE_FIXTURE(Fixture, "overload_resolution")
     REQUIRE(fooType != nullptr);
 
     // A and B are named type aliases referenced (not aliased themselves) in `foo`'s parameter
-    // position, so they now print by name rather than being expanded inline every time.
+    // position, so they print by name rather than being expanded inline every time.
     CHECK(toString(t) == "(A & B) -> (string, number)");
 }
 
@@ -2391,12 +2391,12 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "call_metamethod_checks_a_multret_final_argum
 {
     DOES_NOT_PASS_OLD_SOLVER_GUARD();
 
-    // The resolver forwards the callee as the metamethod's first argument, so the reasoning it
-    // hands back is indexed against a pack one longer than the one built from the call's own
-    // arguments. A final argument that is itself a call contributes a pack rather than a single
-    // type, which skips the per-argument check in TypeChecker2::visit(AstExprCall*) and leaves
-    // overload resolution as the only thing looking at it -- and its report was landing one slot
-    // short, so the mismatch was silently dropped.
+    // The resolver forwards the callee as the metamethod's first argument. So the reasoning it hands back
+    // is indexed against a pack one longer than the one built from the call's own arguments.
+    // A final argument that is itself a call contributes a pack rather than a single type. That skips the
+    // per-argument check in TypeChecker2::visit(AstExprCall*), so overload resolution is the only thing
+    // that checks it. Regression test: its report landed one slot short, so the mismatch was silently
+    // dropped.
     CheckResult result = check(R"(
         type Callable = typeof(setmetatable({}, {} :: { __call: (Callable, number) -> string }))
 

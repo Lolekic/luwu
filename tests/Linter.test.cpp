@@ -372,8 +372,9 @@ TEST_CASE_FIXTURE(Fixture, "LocalShadowClass")
 {
     ScopedFastFlag sff{FFlag::DebugLuauUserDefinedClasses, true};
 
-    // A local before the class hides it from the rest of the module, and one in a function hides it
-    // from the rest of that function; neither is `local cat` or an unrelated class's name.
+    // Two locals shadow the class and are reported. The one before the class hides it from the rest of
+    // the module, and the one in a function hides it from the rest of that function. Neither `local cat`
+    // (a different name) nor the unrelated class `Dog` is reported.
     LintResult result = lint(R"(
 local Cat = 1
 local before = Cat

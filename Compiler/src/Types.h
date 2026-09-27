@@ -45,8 +45,8 @@ void buildTypeMap(
     const DenseHashMap<AstName, Compile::Global>& globals,
     LibraryMemberTypeCallback libraryMemberTypeCb,
     BytecodeBuilder& bytecode,
-    // Luwu: what trackValues found, so an unannotated local takes its initializer's type only when it is never
-    // written; without it no unannotated local does
+    // Luwu: the result of trackValues. An unannotated local takes its initializer's type only when this says
+    // the local is never written. When this is null, no unannotated local takes its initializer's type.
     const DenseHashMap<AstLocal*, Compile::Variable>* variables = nullptr,
     // whether a declared return type of a class's static method may type the call's result (see
     // DebugLuwuCompilerTrustsTypeAnnotations)

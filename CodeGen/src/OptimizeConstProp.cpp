@@ -1267,13 +1267,15 @@ struct ConstPropState
         }
         else if (targetAddr.cmd == IrCmd::TRY_OBJECT_MEMBER_ADDR || targetAddr.cmd == IrCmd::OBJECT_MEMBER_ADDR)
         {
-            // A write to one member can't affect a cached load of a different member, but the same
-            // member of a possibly-aliasing object must be invalidated. Which operand identifies the
-            // member differs: TRY_OBJECT_MEMBER_ADDR is keyed by name constant (OP_C), while
-            // OBJECT_MEMBER_ADDR is keyed by the constant offset (OP_B). A cached load through one form
-            // is only compared against a write through the same form, and a write through the other form
-            // invalidates it outright: one function can reach the same object through both (a proven
-            // `class.isinstance` local next to an untyped receiver, or a freshly constructed object).
+            // A write to one member can't change a cached load of a different member. It does
+            // invalidate cached loads of the same member on any object that might alias this one.
+            //
+            // The two address forms identify a member differently: TRY_OBJECT_MEMBER_ADDR by its name
+            // constant (OP_C), and OBJECT_MEMBER_ADDR by its constant offset (OP_B). So a cached load is
+            // compared only against a write through the same form. A write through the other form
+            // invalidates it unconditionally, because one function can reach the same object through
+            // both forms. Examples: a local proven by `class.isinstance` next to an untyped receiver, or
+            // a freshly constructed object.
             for (auto& [pointerIdx, loadedValueIdx] : objectValueCache)
             {
                 IrInst& address = function.instructions[pointerIdx];
@@ -1447,9 +1449,13 @@ struct ConstPropState
     std::vector<NumberedInstruction> getSlotNodeCache; // Additionally, pcpos argument might be different
     std::vector<NodeSlotState> checkSlotMatchCache;    // Additionally, fallback block argument might be different
 
-    // Luwu Classes object member access (rfcs/classes.md). TRY_OBJECT_MEMBER_ADDR is a fused
-    // guard+address op, so we CSE the address directly. pcpos (OP_B) and fallback (OP_D) may differ;
-    // write bit (OP_E) is tracked so a read may reuse a dominating write's guard, but not vice versa.
+    // Luwu Classes (rfcs/classes.md): earlier TRY_OBJECT_MEMBER_ADDR instructions, for reuse. The
+    // instruction both checks the member and computes its address, so a repeat on the same object
+    // (OP_A) and member name (OP_C) is replaced by the earlier result. The two may have a different
+    // pcpos (OP_B) and fallback (OP_D).
+    //
+    // A write's check (OP_E set) is stronger than a read's, because a write also checks `const`. So a
+    // read may reuse an earlier write's result, but a write may not reuse an earlier read's.
     std::vector<NumberedInstruction> tryObjectMemberCache;
     // The same, for the proven-class direct form: keyed by object pointer (OP_A) and constant member
     // offset (OP_B), with no guard strength to reconcile.

@@ -21,14 +21,21 @@
 // leaving the freshly-constructed object as the constructor's single result. See luaR_createobject.
 static int luaR_createobjectcont(lua_State* L, int status);
 
-LuauClass* luaR_newclass(lua_State* L, TString* name, uint32_t numberofinstancemembers, uint32_t numberofstaticmembers, bool hasmemberdefaults)
+LuauClass* luaR_newclass(
+    lua_State* L,
+    TString* name,
+    uint32_t numberofinstancemembers,
+    uint32_t numberofstaticmembers,
+    bool hasmemberdefaults
+)
 {
     LUAU_ASSERT(L->global->GCthreshold == SIZE_MAX && "GC must be paused");
     LuauClass* classdef = luaM_newgco(L, LuauClass, sizeof(LuauClass), L->activememcat);
     luaC_init(L, classdef, LUA_TCLASS);
 
-    // Every allocation below can raise LUA_ERRMEM, and the class is swept (luaR_freeclass) afterwards,
-    // so every field it frees is valid before the first of them.
+    // Every allocation below can raise LUA_ERRMEM, and the half-built class is still swept afterwards
+    // (luaR_freeclass). So every field luaR_freeclass frees is given a valid value here, before the
+    // first allocation.
     classdef->name = name;
     classdef->staticmembers = NULL;
     classdef->memberstooffset = NULL;
@@ -55,6 +62,7 @@ LuauClass* luaR_newclass(lua_State* L, TString* name, uint32_t numberofinstancem
     memset(classdef->memberflags, 0, classdef->numberofallmembers);
 
     classdef->staticmembers = luaM_newarray(L, numberofstaticmembers, TValue, classdef->memcat);
+    // Initialize static members to nil, otherwise we may read uninitialized memory.
     for (uint32_t i = 0; i < numberofstaticmembers; i++)
         setnilvalue(&classdef->staticmembers[i]);
 
@@ -67,7 +75,8 @@ LuauClass* luaR_newclass(lua_State* L, TString* name, uint32_t numberofinstancem
 
     classdef->memberstooffset = luaH_new(L, 0, classdef->numberofallmembers);
 
-    // The metatable of the _class value_, which only holds `__call`, the constructor.
+    // Initialize the metatable of the _class value_, which for now only
+    // contains an __call entry for the class constructor.
     classdef->metatable = luaH_new(L, 0, 1);
 
     // The constructor can outlive the class (`debug.info` hands it out from inside `__init`), so its
@@ -78,7 +87,8 @@ LuauClass* luaR_newclass(lua_State* L, TString* name, uint32_t numberofinstancem
     memcpy(debugnamestr->data + name->len, kCtorSuffix, sizeof(kCtorSuffix) - 1);
     debugnamestr = luaS_buffinish(L, debugnamestr);
 
-    // The environment only matters to functions that read globals, which the constructor doesn't.
+    // We should probably pass an empty table here rather than the global
+    // environment. (The constructor itself reads no globals.)
     Closure* constructor = luaF_newCclosure(L, 1, L->gt);
     setsvalue(L, &constructor->c.upvals[0], debugnamestr);
     constructor->c.f = luaR_createobject;
@@ -127,7 +137,13 @@ size_t luaR_classsize(const LuauClass* classdef)
 {
     uint32_t numberofstaticmembers = classdef->numberofallmembers - classdef->numberofinstancemembers;
 
-    return sizeof(LuauClass) + numberofstaticmembers * sizeof(TValue) + classdef->numberofallmembers * (sizeof(TString*) + sizeof(uint8_t)) +
+    // The "object" itself ...
+    return sizeof(LuauClass) +
+           // ... plus the method closures, each a `TValue` wide ...
+           (numberofstaticmembers * sizeof(TValue)) +
+           // ... plus a string pointer and a flags byte for each method or property ...
+           (classdef->numberofallmembers * (sizeof(TString*) + sizeof(uint8_t))) +
+           // ... plus the constant field defaults, when the class carries them.
            (classdef->memberdefaults ? classdef->numberofinstancemembers * sizeof(TValue) : 0);
 }
 
@@ -142,8 +158,11 @@ bool luaR_closureisinit(const LuauClass* classdef, const Closure* cl)
 
 bool luaR_closureownsprivateaccess(const LuauClass* classdef, const Closure* cl)
 {
-    // Proto::ownerclass is stamped on every method proto and every proto nested in one (see
-    // luaR_stampownerclass), so this covers closures created inside a method too.
+    // deviaze: Since we're eating the expense of a prop on every proto to keep track of class ownership
+    // for ncg lowering let's just use that prop.
+
+    // Covers all closures lexically scoped inside a private access owning closure
+    // as well (luaR_stampownerclass stamps every proto nested in a method).
     return !cl->isC && cl->l.p->ownerclass == classdef;
 }
 
@@ -166,18 +185,23 @@ static const Closure* luaR_callinglua(lua_State* L)
 
 void luaR_checkprivateaccess(lua_State* L, const TValue* key, const LuauClass* classdef, const Closure* cl, uint32_t offset)
 {
-    // Unlike `private`, this binds native code and the class's own methods too.
+    // deviaze: unlike upstream, we reject all user code calls to __init. We may relax this if a usecase appears later.
+    // (.__init reinits open huge cans of soundness holes around const and private ownership laundering)
     if (LUAU_UNLIKELY((classdef->memberflags[offset] & LBC_CLASSMEMBER_INITBLOCKED) != 0))
         luaG_blockedinitaccesserror(L, classdef->name);
 
     if ((classdef->memberflags[offset] & LBC_CLASSMEMBER_PRIVATE) == 0)
         return;
 
-    // Native code performing the access itself is trusted, whether it is the embedder calling in or a
-    // plugin Luwu code called: it holds the C API, and it holds the LuauObject pointer besides, so
-    // `private` is not a boundary it could be held to. The restriction is on Luwu code -- including
-    // Luwu code that reaches a member through a builtin, since a builtin is not an accessor of its own
-    // (see luaR_callinglua).
+    // deviaze: critically, embedders using C api (native code) should be allowed to bypass private field restrictions;
+    // if they choose to expose unchecked apis (that don't check lua_getmemberaccess) to luwu code that bypasses private access
+    // that's up to them. if a runtime allows users in luwu to load arbitrary C/Rust/whatever code that can access the luwu C API
+    // all bets are off (atp private access is the least of their worries): they shouldn't assume any private access is sandboxed from users.
+    // for embedder provided code written in luwu, embedders could try to use debug apis to see
+    // if any suspicious luwu/c stack frames exist and reject suspicious ones via runtime error from within truly private code.
+    
+    // A builtin doesn't count as native code here: Luwu code reaching a member through one (pcall, xpcall, coroutine lib fns)
+    // is still checked (see luaR_callinglua).
     if (!cl || cl->isC)
         return;
 
@@ -205,14 +229,15 @@ void luaR_checkconstassign(lua_State* L, const TValue* key, const LuauObject* ob
     if ((classdef->memberflags[offset] & LBC_CLASSMEMBER_CONST) == 0)
         return;
 
-    // Unlike `private`, native code is held to this too: `const` is a language guarantee, and nothing a
-    // C function does is construction (construction writes members directly, not through here).
+    // deviaze: embedder code isn't allowed to bypass `const` access (unlike private access) because
+    // allowing such could lead to UB in future const optimizations.
+    // also if you're using `const` just to have embedder-only-assignable fields please just use userdata
     if (!cl || !luaR_closureisinit(classdef, cl))
         luaG_constassignerror(L, key, classdef->name);
 
-    // `__init` constructs the object in its `self` parameter, which is register 0 of its frame (a
-    // vararg `__init` moves its fixed parameters, and its base with them). Any other object of the
-    // class is already constructed.
+    // `__init` constructs the object in its `self` parameter, which is register 0 of its frame. This
+    // holds for a vararg `__init` too: its fixed parameters are moved up, and its frame base moves with
+    // them. Any other object of the class is already constructed.
     LUAU_ASSERT(isLua(L->ci) && clvalue(L->ci->func) == cl);
     const TValue* self = L->ci->base;
     bool writesownself = ttisobject(self) && objectvalue(self) == object;
@@ -329,8 +354,9 @@ static void luaR_applyobjectfieldsas(lua_State* L, LuauClass* classdef, LuauObje
         if (!ttisnil(value))
         {
             setobj(L, &object->members[idx], value);
-            // An __index call can run the collector, so `object` may already be black; once the next
-            // field's lookup overwrites the stack slot, this member is the value's only reference.
+            // An __index call can run the collector, so `object` may already be black. Once the next
+            // field's lookup overwrites the stack slot, this member is the value's only reference, so
+            // it needs the barrier.
             luaC_barrier(L, object, value);
         }
     }
@@ -343,10 +369,14 @@ void luaR_applyobjectfieldsslow(lua_State* L, LuauClass* classdef, LuauObject* o
     luaR_applyobjectfieldsas(L, classdef, object, arg, isLua(L->ci) ? clvalue(L->ci->func) : NULL);
 }
 
+// Initializes the object with the POD constructor, from the user-provided table at `args` mapping
+// expected fields to values. Since classes can have 0 fields that need to be initialized we also allow
+// Class() here as well (if class actually had fields they will be nil, or their default).
+//
 // Field defaults come from one of two places: constant defaults are serialized into the class shape
 // and copied by luaR_newobject, while a class with any non-constant default (`= {}`, a call, ...)
 // calls its synthesized `__defaults` closure here, since those have to be re-evaluated on every
-// construction.
+// construction. Only the latter pays for a `lua_call` here.
 void luaR_initpodobject(lua_State* L, LuauClass* classdef, LuauObject* object, StkId args, int nargs, const Closure* accessor)
 {
     if (nargs > 1)
@@ -380,6 +410,7 @@ void luaR_initpodobject(lua_State* L, LuauClass* classdef, LuauObject* object, S
         luaC_barrierfast(L, object);
     }
 
+    // assume class has 0 fields to initialize or user wants all fields to be nil (or their default)
     if (nargs == 0)
         return;
 
@@ -390,7 +421,7 @@ void luaR_initpodobject(lua_State* L, LuauClass* classdef, LuauObject* object, S
     if (ttistable(arg) && hvalue(arg)->metatable == NULL)
     {
         luaR_applyobjectfields(L, classdef, object, hvalue(arg));
-        // one barrier for every member written, as SETLIST does
+        // Preserve the GC invariant, moving barrier back once after writing multiple objects (similar to SETLIST)
         luaC_barrierfast(L, object);
     }
     else
@@ -449,6 +480,8 @@ int luaR_createobject(lua_State* L)
     luaL_checktype(L, 1, LUA_TCLASS);
     LuauClass* classdef = classvalue(L->base);
 
+    // Ensure a private constructor is only callable from within its own class.
+    //
     // Construction happens on behalf of whoever called the class, so authority is the nearest Lua
     // frame rather than the frame directly below: for `pcall(SomeClass, ...)` that frame is `pcall`,
     // and a builtin is not authority for anything. Native code with no Lua frame under it at all is

@@ -609,13 +609,14 @@ local function generate(seed: number): (string, string)
                     local m = rng.pick(instanceMethods(c, true))
                     local use = if m then `x:{m.name}()` else read
 
-                    -- The point of these is that a stale proof would run `c`'s body against whatever the
-                    -- local now holds, so the new value must be something *other* than a `c`: another
-                    -- class when the module has one, else a non-object. Rebinding to another `c` (which
-                    -- `r2` may well be) would run the right body anyway and prove nothing.
-                    -- Another class is the valuable target: a stale proof then runs the wrong *body* and
-                    -- returns a wrong value, which the runner compares against -O0. A non-object usually
-                    -- just errors at every level, and the runner only compares statuses when both fail.
+                    -- A stale proof would run `c`'s body against whatever the local holds after the write.
+                    -- So the new value must not be a `c`. Rebinding to another `c` (which `r2` may well be)
+                    -- would run the right body anyway and test nothing.
+                    -- The new value is usually another class when the module has one (75% of the time), and
+                    -- otherwise a non-object. Another class is the more useful target. A stale proof then
+                    -- runs the wrong body and returns a wrong value, which the runner catches by comparing
+                    -- against -O0. A non-object usually just errors at every level, and when both runs fail
+                    -- the runner compares only their statuses.
                     local elsewhere = filter(classes, function(o)
                         return o ~= c
                     end)

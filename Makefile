@@ -196,7 +196,7 @@ $(ANALYZE_CLI_TARGET): LDFLAGS+=-lpthread
 fuzz-proto fuzz-prototest: LDFLAGS+=$(LPROTOBUF)
 
 # pseudo targets
-.PHONY: all test clean coverage format luau-size aliases build-mutator-libs
+.PHONY: all test clean coverage luau-size aliases build-mutator-libs
 
 # Explicitly make 'all' the default goal ensuring that even if targets are added before 'all', they won't
 # implicitly become the default target built by make.
@@ -237,9 +237,6 @@ coverage: $(TESTS_TARGET) $(COMPILE_CLI_TARGET)
 	llvm-cov show -format=html -show-instantiations=false -show-line-counts=true -show-region-summary=false -ignore-filename-regex=\(tests\|extern\|CLI\)/.* -output-dir=coverage --instr-profile default.profdata -object build/coverage/luau-tests -object build/coverage/luau-compile
 	llvm-cov report -ignore-filename-regex=\(tests\|extern\|CLI\)/.* -show-region-summary=false --instr-profile default.profdata -object build/coverage/luau-tests -object build/coverage/luau-compile
 	llvm-cov export -ignore-filename-regex=\(tests\|extern\|CLI\)/.* -format lcov --instr-profile default.profdata -object build/coverage/luau-tests -object build/coverage/luau-compile >coverage.info
-
-format:
-	git ls-files '*.h' '*.cpp' | xargs clang-format-11 -i
 
 FUZZ_OBJECTS: $(MUTATOR_LIBS)
 

@@ -299,16 +299,22 @@ static uint32_t getFloatBits(float value)
     return result;
 }
 
-// Luwu Classes (rfcs/classes.md): a64 counterpart of emitClassMemberAuthX64 -- authorize
-// private/const access to the member at `slotReg` on `classReg` (an object's lclass, or a class
-// object directly), or jump to `mismatch` (the interpreter fallback, which raises the error). A
-// member with no access bits is unrestricted; a private/const member takes the fast path only when
-// `classReg == currentClosure->l.p->ownerclass` (exactly luaR_closureownsprivateaccess); a const
-// write (`writtenObject` is the object being written, noreg for a read) additionally requires the
-// closure to be the class's __init (luaR_closureisinit) and the object to be the `self` in register 0
-// of its frame (luaR_checkconstassign). `slotReg` holds the raw member offset and must stay live across
-// this call. Every temporary is reserved before the first branch: `authorized` rejoins the main line, so
-// a register evicted after that branch would be stored only on the path that skipped it.
+// Luwu Classes (rfcs/classes.md): the a64 counterpart of emitClassMemberAuthX64. Authorizes
+// private/const access to the member at `slotReg` on `classReg`, which is an object's lclass or a
+// class object. When access is not authorized, it jumps to `mismatch`, the interpreter fallback that
+// raises the error.
+//
+// - A member with no access bits is unrestricted.
+// - A private or const member passes only when `classReg == currentClosure->l.p->ownerclass`. This is
+//   exactly luaR_closureownsprivateaccess.
+// - A const write also requires the closure to be the class's `__init` (luaR_closureisinit), and the
+//   object being written to be the `self` in register 0 of its frame (luaR_checkconstassign).
+//   `writtenObject` is the object being written, or noreg for a read.
+//
+// `slotReg` holds the raw member offset and must stay live across this call.
+//
+// Every temporary is reserved before the first branch. The branch to `authorized` rejoins the main
+// line, so a register evicted after it would be stored only on the path that didn't take it.
 static void emitClassMemberAuthA64(
     AssemblyBuilderA64& build,
     IrRegAllocA64& regs,
@@ -1932,9 +1938,9 @@ void IrLoweringA64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
     }
     case IrCmd::CLASS_ISINSTANCE:
     {
-        // result = (tag == object) && (value->lclass == class); the deref is guarded by the tag check
-        // constant propagation can replace the tag with a known constant (e.g. after CHECKSELFCLASS
-        // has already established that the value is an object), in which case the guard folds away
+        // result = (tag == object) && (value->lclass == class). The deref is guarded by the tag check.
+        // Constant propagation can replace the tag with a known constant (e.g. after CHECKSELFCLASS
+        // has established that the value is an object), and then the guard folds away.
         CODEGEN_ASSERT(OP_A(inst).kind == IrOpKind::Inst || OP_A(inst).kind == IrOpKind::Constant);
         bool knownTag = OP_A(inst).kind == IrOpKind::Constant;
 

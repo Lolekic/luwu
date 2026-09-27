@@ -48,10 +48,10 @@ namespace Luau
 namespace
 {
 
-// Luwu Classes (rfcs/classes.md): with DebugLuauUserDefinedClasses off, upstream reports "Incomplete
-// statement: expected assignment or a function call" for `class X` (and for `export class X`). Luwu
-// reports this instead, whatever the other class flags are set to. `class Name` is never valid Luau, so
-// only the text of an error that upstream already reports changes.
+// Luwu Classes (rfcs/classes.md): `class` is a contextual keyword, so with the classes flags off a
+// class declaration parses as a nonsense expression statement and reports something about assignments
+// (upstream: "Incomplete statement: expected assignment or a function call").
+// Users have read that as "my Luwu build is broken", so say what is actually wrong.
 const char* const kClassesDisabledError =
     "Classes are currently disabled; enable the 'DebugLuauUserDefinedClasses', 'DebugLuauUserDefinedClassesRuntime' and "
     "'LuwuBetterUserDefinedClasses' fast flags to use 'class'";
@@ -461,6 +461,7 @@ AstStatBlock* Parser::parseBlockNoScope()
     return allocator.alloc<AstStatBlock>(location, copy(body));
 }
 
+// Luwu Classes (rfcs/classes.md): the grammar below adds classStatement (see parseClassStat).
 // stat ::=
 // varlist `=' explist |
 // functioncall |
@@ -474,7 +475,8 @@ AstStatBlock* Parser::parseBlockNoScope()
 // attributes function funcname funcbody |
 // local function Name funcbody |
 // local attributes function Name funcbody |
-// local namelist [`=' explist]
+// local namelist [`=' explist] |
+// classStatement
 // laststat ::= return [explist] | break
 AstStat* Parser::parseStat()
 {
@@ -1650,8 +1652,8 @@ const std::unordered_set<std::string> EXPLICITLY_DISALLOWED_METAMETHODS{
 } // namespace
 
 // Luwu Classes (rfcs/classes.md): parse the parameter list of a class's primary constructor, e.g. the
-// `(name: string, age = 0)` of `class Cat(name: string, age = 0)`. Each parameter implicitly declares
-// a field of the same name (public and mutable unless qualified), and the whole list is compiled into a synthesized `__init`.
+// `(name: string, age = 0)` of `class Cat(name: string, age = 0)`. Each parameter also declares a field
+// of the same name, public and mutable unless qualified. The list is compiled into a synthesized `__init`.
 LUAU_NOINLINE AstClassPrimaryConstructor* Parser::parseClassPrimaryConstructor(
     const std::optional<Location>& qualifierLocation,
     AstClassMemberVisibility visibility
@@ -1667,10 +1669,10 @@ LUAU_NOINLINE AstClassPrimaryConstructor* Parser::parseClassPrimaryConstructor(
     TempVector<AstClassPrimaryConstructorParamQualifiers> argQualifiers(scratchClassParamQualifiers);
     DenseHashSet<AstName> argNames{{}};
 
-    // The parameters, and the default value expressions attached to them, are compiled into the
-    // class's synthesized `__init`, which is one function scope deeper than the class declaration
-    // itself. Parse them at that depth so references to outer locals are correctly marked as
-    // upvalues -- the same dummyFunction push class field default values use.
+    // The parameters and their default values are compiled into the class's synthesized `__init`,
+    // which is one function scope deeper than the class declaration. Parse them at that depth, so
+    // references to outer locals are marked as upvalues. Field default values do the same
+    // dummyFunction push.
     static Function dummyFunction;
     functionStack.emplace_back(dummyFunction);
 
@@ -1683,11 +1685,13 @@ LUAU_NOINLINE AstClassPrimaryConstructor* Parser::parseClassPrimaryConstructor(
         }
         else
         {
-            // Luwu Classes (rfcs/classes.md): a parameter may carry the access specifier and the
-            // `const` modifier of the field it declares, Kotlin-style: `class SshKey private (public
-            // const public_key: string, private const private_key: string)`. A qualifier is only a
-            // qualifier when another name follows it, so a parameter written as one of those keywords
-            // alone reads as a parameter name -- and is then rejected as a keyword field name below.
+            // Luwu Classes (rfcs/classes.md): a parameter may carry the access specifier and `const`
+            // modifier of the field it declares, Kotlin-style:
+            // `class SshKey private (public const public_key: string, private const private_key: string)`.
+            //
+            // `public`, `private` and `const` only count as qualifiers when another name follows them.
+            // A parameter named just `public` is read as a parameter name, and then rejected below
+            // because fields can't be named after those keywords.
             AstClassPrimaryConstructorParamQualifiers qualifiers;
 
             // `const public x` is the wrong order; the modifier follows the access specifier.
@@ -1751,9 +1755,9 @@ LUAU_NOINLINE AstClassPrimaryConstructor* Parser::parseClassPrimaryConstructor(
         }
     }
 
-    // The locals are created inside the dummy scope, so the synthesized `__init` sees them as its
-    // own parameters, and then immediately taken back out of scope: they are only visible to field
-    // initializer expressions, which push them again (see pushClassPrimaryConstructorParams).
+    // The locals are created inside the dummy scope, so the synthesized `__init` sees them as its own
+    // parameters. Then they go straight back out of scope. Only field initializer expressions can see
+    // them, and those push them again (see pushClassPrimaryConstructorParams).
     unsigned int localsBegin = saveLocals();
 
     TempVector<AstLocal*> vars(scratchLocal);
@@ -1782,10 +1786,10 @@ LUAU_NOINLINE AstClassPrimaryConstructor* Parser::parseClassPrimaryConstructor(
     return primaryConstructor;
 }
 
-// Luwu Classes (rfcs/classes.md): does the token the class body is sitting on read as a statement
-// rather than as a member declaration? A member is `name`, `name: T`, `name = expr` or a `function`;
-// anything that starts a statement outright, or a name followed by a call/index/comma, is a sign the
-// class was never closed and we are now eating the code that follows it.
+// Luwu Classes (rfcs/classes.md): does the current token in a class body start a statement rather than
+// a member? A member is `name`, `name: T`, `name = expr` or a `function`. A statement keyword, or a name
+// followed by a call, index or comma, means the class was never closed and we are now eating the code
+// that follows it.
 bool Parser::classBodyLooksLikeStatement()
 {
     if (lexer.current().type == '(')
@@ -1807,12 +1811,13 @@ bool Parser::classBodyLooksLikeStatement()
         return false;
     }
 
-    // `print(...)`, `t.field = x`, `a, b = 1, 2` -- none of which a class member can be. Note `name:`
-    // is deliberately absent: that is a member's type annotation.
+    // `print(...)`, `t.field = x` and `a, b = 1, 2` can't be class members. `name:` is not in this
+    // list on purpose: it starts a member's type annotation.
     Lexeme::Type next = lexer.lookahead().type;
     return next == '(' || next == '.' || next == ',' || next == '[';
 }
 
+// Luwu Classes (rfcs/classes.md): the grammar is also in the RFC's "Class definition syntax" section.
 // classStatement ::= [`export'] `class' Name [`<' GenericTypeListWithDefaults `>'] [primaryCtor] {classMember} `end'
 // primaryCtor ::= [access] `(' [ctorParam {`,' ctorParam}] `)'
 // ctorParam ::= [access] [`const'] Name [`:' Type] [`=' exp]
@@ -1855,9 +1860,9 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
         nextLexeme();
     }
 
-    // Luwu Classes (rfcs/classes.md): no classical inheritance. Upstream Luau spells it `class A extends B`,
-    // which would otherwise parse here as a class with two bare fields named `extends` and `B`; say what's
-    // wrong instead, for anyone porting Luau classes. Checked before and after a primary constructor.
+    // Luwu Classes (rfcs/classes.md): no classical inheritance. Upstream Luau spells it `class A extends B`.
+    // Here that would parse as a class with two bare fields, `extends` and `B`, so report what's actually
+    // wrong for anyone porting upstream classes. Checked both before and after a primary constructor.
     auto rejectExtends = [&]()
     {
         if (!FFlag::LuwuBetterUserDefinedClasses || lexer.current().type != Lexeme::Name || AstName(lexer.current().name) != "extends" ||
@@ -1871,13 +1876,13 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
 
         report(
             Location(extendsLocation, baseLocation),
-            "Luwu classes don't support inheritance ('extends'); hold the other class in a field and forward to it instead"
+            "Luwu classes don't support classic inheritance ('extends'); consider composing your classes (holding another class in your class)"
         );
     };
 
-    // Luwu Classes (rfcs/classes.md): `implements` is reserved in the class header for the traits work,
-    // and like `extends` would otherwise parse as a pile of bare fields. Consume the whole interface
-    // list so only one error comes out of it.
+    // Luwu Classes (rfcs/classes.md): `implements` is reserved in the class header for traits. Like
+    // `extends`, it would otherwise parse as a list of bare fields. The whole interface list is consumed
+    // so it produces only one error.
     auto rejectImplements = [&]()
     {
         if (!FFlag::LuwuBetterUserDefinedClasses || lexer.current().type != Lexeme::Name || AstName(lexer.current().name) != "implements" ||
@@ -1913,10 +1918,10 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
         rejectImplements();
     }
 
-    // Every parameter implicitly declares a field of the same name, so a *method* named after one
-    // collides with it. A *property* named after one does not: that's how the RFC spells applying an
-    // access specifier or modifier to a parameter's field, so those are left out of
-    // classMemberNamespace and checked against it only once, when restated.
+    // Every parameter declares a field of the same name, so a *method* with that name collides with it.
+    // A *field* with that name doesn't: restating a parameter's field in the class body is how the RFC
+    // gives it an access specifier or modifier. So parameters are kept out of classMemberNamespace, and a
+    // restated field is added to it like any other member.
     DenseHashSet<AstName> primaryConstructorParams{{}};
 
     if (primaryConstructor)
@@ -1976,13 +1981,9 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
     // slightly more performant here (e.g.: a "scratch" set).
     DenseHashSet<AstName> classMemberNamespace{{}};
 
-    // Under LuwuBetterUserDefinedClasses, if *any* member carries an explicit
-    // access specifier -- `public` just as much as `private` -- then every
-    // member must carry one, so that a bare `x: number` never has to be read
-    // against the rest of the class to know how it is accessed. We collect the
-    // locations of members that didn't have an explicit qualifier as we go, and
-    // only report them once we know whether the class ended up with any
-    // qualifier at all (rfcs/classes.md).
+    // Members without an access specifier, collected while parsing the body. Whether they are errors
+    // depends on whether any other member has a specifier, which is only known once the whole class is
+    // parsed (see the all-or-nothing check after the body, rfcs/classes.md).
     std::vector<std::pair<Location, bool>> unqualifiedMemberLocations; // (location, isFunction)
     std::vector<Location> explicitPublicQualifierLocations;
     // Primary constructor parameters whose field the class body restates with an explicit access
@@ -1995,11 +1996,10 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
 
     while (lexer.current().type != Lexeme::ReservedEnd && lexer.current().type != Lexeme::Eof)
     {
-        // A class body and a statement list overlap enough (`const x = f()` is valid as either) that a
-        // class missing its `end` silently swallows the statements after it, and then reports a pile of
-        // nonsense at whatever token finally fails to be a member -- often many lines away. When the
-        // token we're looking at reads as a *statement* rather than a member, say what actually went
-        // wrong and hand the rest of the file back to the enclosing block.
+        // A class body and a statement list overlap: `const x = f()` is valid as either. So a class
+        // missing its `end` swallows the statements after it, and the error shows up at whichever token
+        // finally isn't a member, often many lines away. When the current token reads as a statement,
+        // report the missing `end` here and hand the rest of the file back to the enclosing block.
         if (FFlag::LuwuBetterUserDefinedClasses && classBodyLooksLikeStatement())
         {
             report(
@@ -2015,11 +2015,11 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
         std::optional<Location> qualifierLocation;
         AstClassMemberVisibility visibility = AstClassMemberVisibility::Public;
 
-        // Luwu Classes (rfcs/classes.md): a class method may carry attributes, exactly like a free
-        // function -- `@native function update(self) end`. They may be written on either side of the
-        // access specifier (`@native private function` and `private @native function` both read
-        // naturally depending on whether the attribute is on its own line), but not on both sides at
-        // once, which would leave a reader scanning in two places for them.
+        // Luwu Classes (rfcs/classes.md): a class method may carry attributes, like a free function:
+        // `@native function update(self) end`. They can go on either side of the access specifier.
+        // `@native private function` reads well when the attribute has its own line, and
+        // `private @native function` when it doesn't. They can't go on both sides at once, so a reader
+        // only has to look in one place.
         AstArray<AstAttr*> attributes{nullptr, 0};
         TempVector<CstAttrList*> cstAttrLists(scratchCstAttrList);
 
@@ -2062,9 +2062,9 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
             }
         }
 
-        // An access specifier is only an access specifier when a member follows it; `public: number` is
-        // a member *named* `public`, which the RFC disallows -- but saying so beats reporting a missing
-        // field name (rfcs/classes.md).
+        // An access specifier only counts as one when a member follows it. `public: number` is a member
+        // *named* `public`. The RFC disallows that name, and reporting it is clearer than reporting a
+        // missing field name (rfcs/classes.md).
         auto qualifierIntroducesMember = [&]()
         {
             if (!FFlag::LuwuBetterUserDefinedClasses)
@@ -2120,10 +2120,10 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
 
             attributes = {nullptr, 0};
 
-            // A field name still parses as the field it is, keeping whatever access specifier came
-            // with it. Anything else (the class's own `end`, most of all) goes back around the loop
-            // -- parsing it as a field would consume the `end` and swallow the rest of the file.
-            // The attributes were consumed, so this makes progress either way.
+            // A field name still parses as a field, with whatever access specifier came with it.
+            // Anything else, most often the class's own `end`, goes back around the loop. Parsing it as
+            // a field would consume the `end` and swallow the rest of the file. The attributes were
+            // consumed either way, so the loop still makes progress.
             if (lexer.current().type != Lexeme::Name)
                 continue;
         }
@@ -2160,10 +2160,10 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
             if (FFlag::LuwuBetterUserDefinedClasses && !qualifierLocation)
                 unqualifiedMemberLocations.push_back({propName->location, /* isFunction */ false});
 
-            // Luwu Classes (rfcs/classes.md): restating a primary constructor parameter's field is how
-            // an *unqualified* parameter list gets its access specifiers, but a parameter that already
-            // states its own may not be contradicted here -- reading `public text` in the header and
-            // `private text` in the body would leave neither one trustworthy.
+            // Luwu Classes (rfcs/classes.md): restating a primary constructor parameter's field in the
+            // body is how an *unqualified* parameter gets its access specifier. A parameter that already
+            // has one can be restated, but not contradicted: with `public text` in the header and
+            // `private text` in the body, a reader couldn't trust either.
             if (FFlag::LuwuBetterUserDefinedClasses)
             {
                 if (int paramIndex = findPrimaryConstructorParam(propName->name); paramIndex >= 0)
@@ -2378,12 +2378,14 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
         }
     }
 
-    // Luwu Classes (rfcs/classes.md): access specifiers are all-or-nothing across a class. A class
-    // that writes none of them is entirely public, which is the POD case the RFC deliberately keeps
-    // terse; but the moment one member -- or one primary constructor parameter -- says `public` or
-    // `private`, every other member and parameter has to say which it is, so that the unqualified ones
-    // can never be mistaken for an oversight. Note the primary constructor's *own* qualifier (`class
-    // PositiveNumber private (...)`) is not a member qualifier and does not trigger any of this.
+    // Luwu Classes (rfcs/classes.md): access specifiers are all-or-nothing within a class.
+    //
+    // A class with no access specifiers is entirely public. That's the POD case, which the RFC keeps
+    // short on purpose. Once any member or primary constructor parameter says `public` or `private`,
+    // every other member and parameter must say one too, so a missing one can't be an oversight.
+    //
+    // The primary constructor's own specifier (`class PositiveNumber private (...)`) makes the
+    // constructor private. It isn't a member's specifier, so it doesn't count here.
     if (FFlag::LuwuBetterUserDefinedClasses && (sawPrivateMember || sawQualifiedParam || !explicitPublicQualifierLocations.empty()))
     {
         if (sawPrivateMember || sawQualifiedParam)
@@ -2421,9 +2423,10 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
                 );
         }
 
-        // A parameter's field is qualified either in the parameter list or by the class body member
-        // that restates it; a field qualified in neither is the same ambiguity as an unqualified
-        // member, and gets a message pointing at whichever of the two places is the natural fix.
+        // A parameter's field can be qualified in the parameter list, or by a class body member that
+        // restates it. A field qualified in neither place is as ambiguous as an unqualified member. The
+        // message points at the place that is the natural fix: the parameter list if other parameters
+        // are qualified there, otherwise either one.
         if (primaryConstructor)
         {
             for (size_t i = 0; i < primaryConstructor->args.size; ++i)
@@ -2690,7 +2693,7 @@ AstStat* Parser::parseDeclaration(const Location& start, const AstArray<AstAttr*
 
         if (FFlag::LuwuGenericNominals)
         {
-            // An extern type's generic parameter list may carry defaults, like a type alias's --
+            // Luwu (rfcs/generics-on-extern-types.md): An extern type's generic parameter list may carry defaults:
             // `declare extern type Box<T = string> with ... end`.
             std::tie(classGenerics, classGenericPacks) = parseGenericTypeList(/* withDefaultValues= */ true);
         }

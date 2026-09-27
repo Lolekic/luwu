@@ -764,13 +764,16 @@ uint8_t getRegTag(std::array<uint8_t, 256>& regTags, BytecodeTypeInfo& bcTypeInf
     return regTags[reg];
 }
 
-// Luwu Classes (rfcs/classes.md): for each bytecode block, the register that a `class.isinstance(x, C)`
-// branch into it proves holds an object, or -1. Recognizes the fused form
-// (`JUMPXISA x ...`, with or without CHECKCLASS) and the unfused builtin form (`FASTCALL2 isinstance x C`,
-// `CALL`, then `JUMPIF`/`JUMPIFNOT` on its result). Only a block whose single predecessor is that branch
-// qualifies. The result is a type hint like any other: codegen guards the tag, so a wrong hint costs a VM
-// exit, never correctness -- it just lets field accesses and method calls on `x` take the object path
-// directly instead of missing the table path first.
+// Luwu Classes (rfcs/classes.md): finds registers that a `class.isinstance(x, C)` branch proves hold
+// an object. For each bytecode block, the result is the register `x` if the block is entered through
+// such a branch, or -1. Only a block whose single predecessor is that branch qualifies.
+//
+// Two shapes are recognized: the fused `JUMPXISA x ...` (with or without CHECKCLASS), and the unfused
+// builtin call (`FASTCALL2 isinstance x C`, `CALL`, then `JUMPIF`/`JUMPIFNOT` on its result).
+//
+// The result is a type hint like any other. Codegen still guards the tag, so a wrong hint costs a VM
+// exit and never correctness. A right one lets field accesses and method calls on `x` go straight to
+// the object path instead of missing the table path first.
 static std::vector<int> findIsinstanceProvenObjectRegs(const IrFunction& function)
 {
     Proto* proto = function.proto;

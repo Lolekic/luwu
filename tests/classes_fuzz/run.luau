@@ -36,7 +36,7 @@ const FLAGS = "--fflags="
         "LuwuBetterUserDefinedClasses=true",
         "LuwuGenericNominals=true",
         "LuauExportValueSyntax=true",
-        "LuauExportedClassIsNilWorkaround=true",
+        "LuwuExportedClassIsNilWorkaround=true",
         "LuwuDefaultArguments=true",
         "LuwuNonePrimitive=true",
     }, ",")

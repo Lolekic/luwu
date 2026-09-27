@@ -18,14 +18,15 @@ TEST_SUITE_BEGIN("ToString");
 
 TEST_CASE_FIXTURE(Fixture, "definition_file_union_and_function_alias_names_survive_clonePublicInterface")
 {
-    // Regression test: Module::clonePublicInterface (Module.cpp) moves declaredGlobals and
-    // exportedTypeBindings from a module's internalTypes arena into its interfaceTypes arena via
-    // Substitution.cpp's hand-rolled shallowClone, which explicitly enumerates fields per type kind
-    // instead of doing a generic copy. That clone already carried TableType::name/syntheticName,
-    // but not the newer UnionType/IntersectionType/FunctionType name fields, so any alias exposed
-    // through a `declare`/`export type` in a definition file silently lost its name at this exact
-    // clone boundary (regular, non-exported local bindings never hit this path, which is why the
-    // bug didn't show up in ordinary modules).
+    // Regression test. Module::clonePublicInterface (Module.cpp) moves declaredGlobals and
+    // exportedTypeBindings from a module's internalTypes arena into its interfaceTypes arena. It copies
+    // them with Substitution.cpp's hand-rolled shallowClone, which lists the fields to copy for each type
+    // kind instead of doing a generic copy.
+    //
+    // That clone carried TableType::name/syntheticName, but not the newer name fields on UnionType,
+    // IntersectionType and FunctionType. So an alias exposed through a `declare` or `export type` in a
+    // definition file silently lost its name at this clone. Ordinary modules didn't show the bug, because
+    // regular, non-exported local bindings never go through this path.
     loadDefinition(R"(
         export type Pathlike = number | string
         declare function useIt(p: Pathlike): ()

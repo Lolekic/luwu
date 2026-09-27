@@ -39,12 +39,12 @@ LUAU_FASTFLAGVARIABLE(LuauCompileStringInterpTargetTop)
 LUAU_FASTFLAG(DebugLuauNoInline)
 LUAU_FASTFLAGVARIABLE(LuauEmitCallFeedback)
 LUAU_FASTFLAG(LuwuDefaultArguments)
-LUAU_FASTFLAGVARIABLE(LuauExportedClassIsNilWorkaround)
+LUAU_FASTFLAGVARIABLE(LuwuExportedClassIsNilWorkaround)
 
 // May the compiler act on a type annotation it cannot verify? The same question the `--!trust` directive
 // answers per file (Compiler::trustsTypeAnnotations); this flag answers it for a whole embedder.
 //
-// Everything it currently changes is about class receivers, so the rest of this comment is.
+// Today the flag only affects class receivers, so the rest of this comment is about them.
 //
 // Off (the default), only a *proven* receiver inlines. A receiver is proven when a runtime check on the
 // path reaching it establishes its class. There are four:
@@ -175,11 +175,13 @@ struct Compiler
 {
     struct RegScope;
 
-    // Data compileFunction needs to emit a CHECKSELFCLASS self-validation for a method: an
-    // expression that evaluates to the owning class (for the check's class register), and the
-    // method's name for the error CHECKSELFCLASS raises when the check fails. The class this method
-    // belongs to, the receiver's actual class or type, and the `.`/`:` spelling of the call are all
-    // supplied by the error opcode's operands, so nothing here is baked into a string.
+    // Data compileFunction needs to emit a method's CHECKSELFCLASS: an expression that evaluates to
+    // the owning class (for the check's class register), and the method's name for the error the
+    // check raises when it fails.
+    //
+    // No error string is built here. The VM formats the message at runtime from the instruction's
+    // operands: the method's class from the class operand, the receiver's actual class or type from
+    // the checked register, and the `.`/`:` spelling of the call from operand C.
     struct SelfClassCheck
     {
         AstExpr* classExpr;
@@ -1031,11 +1033,12 @@ struct Compiler
                 return false;
             }
 
-        // Luwu Classes (rfcs/classes.md): a function expression inside the inlined body becomes a child proto of the
-        // caller as well as of the callee, and luaR_stampownerclass stamps every child of a class's method protos --
-        // so inlining it into a function of a different class (or into a class from outside, or vice versa) would
-        // give that one shared proto the wrong `ownerclass` everywhere it is used, not just here: a free function's
-        // inner closure would get private access to the class it was inlined into, from any caller.
+        // Luwu Classes (rfcs/classes.md): a function expression inside the inlined body is one proto, and it
+        // becomes a child of both the caller and the callee. luaR_stampownerclass stamps every child proto of a
+        // class's methods with that class. So inlining the body into a different class, from outside any class
+        // into a class, or from a class to outside, gives that one shared proto the wrong `ownerclass`. The
+        // wrong stamp applies everywhere the proto is used, not just at this call site. For example, a free
+        // function's inner closure would get private access to the class it was inlined into, from any caller.
         if (FFlag::DebugLuauUserDefinedClasses && currentFunction && lexicalClassOf(func) != lexicalClassOf(currentFunction) &&
             functionContainsNestedFunctions(func))
         {
@@ -1209,15 +1212,16 @@ struct Compiler
         return cost;
     }
 
-    // Luwu Classes (rfcs/classes.md): the class of a receiver whose class is *proven* rather than
-    // inferred -- the enclosing method's own `self`, which the method prologue's CHECKSELFCLASS has
-    // already established is an instance of the method's class, and which is const (the parser rejects
-    // every write to it); or an inlined method's `self` proven at its inline site (inlineProvenSelfClass).
+    // Luwu Classes (rfcs/classes.md): the class of a receiver whose class is *proven*, not inferred. That is
+    // one of:
+    //  - the enclosing method's own `self`. The method prologue's CHECKSELFCLASS has already checked that it
+    //    is an instance of the method's class, and it is const (the parser rejects every write to it).
+    //  - an inlined method's `self` that its inline site proved (inlineProvenSelfClass).
     //
-    // Deliberately not resolveReceiverClass: that one also believes type annotations, and an annotation
-    // can lie (see the inlining tests). Nothing here trusts anything the runtime hasn't checked, which
-    // is what makes GETOBJECTMEMBER/SETOBJECTMEMBER sound -- they use a constant member offset with no
-    // class check of their own.
+    // This deliberately doesn't use resolveReceiverClass, which also believes type annotations, and an
+    // annotation can lie (see the inlining tests). GETOBJECTMEMBER and SETOBJECTMEMBER use a constant member
+    // offset with no class check of their own. They are sound only because nothing here trusts anything the
+    // runtime hasn't checked.
     AstStatClass* provenSelfClass(AstExpr* recv)
     {
         if (!FFlag::DebugLuauUserDefinedClasses || !currentFunction)
@@ -1359,9 +1363,11 @@ struct Compiler
     }
 
     // The constant offset to use for `recv.<name>`, or -1 to compile the access the ordinary way. `recv` must
-    // be a proven `self` (a method's own, or an inlined method's; see provenSelfClass) or a local proven by an
-    // enclosing `class.isinstance` branch. The offset skips GETTABLEKS's private check, so for an
-    // isinstance-proven local a private member only qualifies inside one of the class's own methods.
+    // be a proven `self` (a method's own, or an inlined method's; see provenSelfClass), or a local proven by
+    // `class.isinstance` in an enclosing `if` or a preceding `assert` (see provenIsinstanceClass).
+    //
+    // Access by constant offset skips GETTABLEKS's private-access check. So for an isinstance-proven local, a
+    // private member only gets an offset when the code being compiled is one of the class's own methods.
     int provenSelfMemberOffset(AstExpr* recv, const AstName& name, bool forWrite)
     {
         if (AstStatClass* decl = provenSelfClass(recv))
@@ -1388,7 +1394,8 @@ struct Compiler
     // Luwu Classes (rfcs/classes.md): the class of an inlined method's `self`, when the inline site proved it and the
     // body never reassigns it (see compileInlinedCall). Treating it like a method's own `self` is sound for private
     // members too: the only code that can name this local is the method's own body, which is lexically the class's.
-    // Only in the function the method was inlined into -- a closure nested in the body is a different frame.
+    // The proof only holds in the function the method was inlined into. A closure nested in the body runs in a
+    // different frame, so it gets nothing here.
     AstStatClass* inlineProvenSelfClass(AstExpr* recv)
     {
         AstExprLocal* le = recv->as<AstExprLocal>();
@@ -1440,9 +1447,10 @@ struct Compiler
     // May this compilation act on a type annotation nothing verified? Either the file said so with
     // `--!trust` or the embedder said so for everything it compiles.
     //
-    // The per-file half is a member rather than a CompileOptions field because that struct is memcpy'd
-    // from its C counterpart and the two are asserted to be the same size (lcode.cpp). Which suits the
-    // feature: the promise is about the annotations in one file, so the file is what makes it.
+    // The per-file half is a member rather than a CompileOptions field, because that struct is memcpy'd
+    // from its C counterpart and the two are asserted to be the same size (lcode.cpp). That placement also
+    // fits the feature: `--!trust` is a promise about the annotations in one file, so the file is what
+    // makes the promise.
     bool trustTypeAnnotations = false;
 
     bool trustsTypeAnnotations() const
@@ -1598,14 +1606,16 @@ struct Compiler
         return false;
     }
 
-    // Luwu Classes (rfcs/classes.md): a POD class's constructor reads an object argument's fields by name, with the
-    // private access of the nearest Lua frame. Code that is compiled into another frame than the one it was written
-    // in -- an inlined method body, a primary constructor's initializers compiled at the construction site -- sees
-    // that frame's access instead, so it may not hand anything that might be an object to anything that might be a
-    // POD construction: a POD class called directly, a POD class used as a value (`pcall(Pod, obj)`, an alias), or a
-    // callee the compiler can't identify. Sets `mayConstructPod` when it finds one.
+    // Luwu Classes (rfcs/classes.md): a POD class's constructor reads the fields of an object argument by name,
+    // using the private access of the nearest Lua frame.
     //
-    // Subclasses say what else they know: which `x:name()` calls certainly reach a method, and which values a
+    // Some code is compiled into a different frame than the one it was written in: an inlined method body, or a
+    // primary constructor's initializers compiled at the construction site. That code gets the new frame's
+    // private access instead. So it must not pass anything that might be an object to anything that might be a
+    // POD construction. That means a POD class called directly, a POD class used as a value (`pcall(Pod, obj)`,
+    // an alias), or a callee the compiler can't identify. The visitor sets `mayConstructPod` when it finds one.
+    //
+    // Subclasses add what they know: which `x:name()` calls certainly reach a method, and which values a
     // declaration says are not objects.
     struct PodConstructionVisitor : AssignmentVisitor
     {
@@ -1743,22 +1753,29 @@ struct Compiler
         }
     };
 
-    // Luwu Classes (rfcs/classes.md): whether `method` of `cls`, inlined into code outside `cls`, behaves exactly as the
-    // call would as far as `accessClass`'s private members go. Private access is authorized at runtime against the
-    // *running* closure, which for inlined code is the caller's. So with `accessClass` = cls, an access in the body
-    // that stays runtime-checked and could reach one of cls's private members would wrongly raise; and with
-    // `accessClass` = the caller's class, one that could reach the caller's private members would wrongly succeed.
-    // The body may touch private members only through its own proven `self` (compiled to a constant offset, no
-    // runtime check; see inlineProvenSelfClass). Refuses:
-    //  - a name private to accessClass on anything else, a private method or static (even on `self`), and a write to
-    //    a `const` field (which stays runtime-checked);
-    //  - constructing accessClass through a private constructor (NEWOBJECT's check sees the caller);
-    //  - a possible POD construction of a possible object (PodConstructionVisitor);
-    //  - indexing with a runtime key (`x[k]`) unless `x` is known not to be an object: `k` could name a private
-    //    member. With `accessClass` = cls, "known" trusts declared table types (`inner: { T }`), so a declaration
-    //    that lies can still make the inlined body raise where the call wouldn't -- never the reverse, which is why
-    //    declarations are not trusted when checking the caller's class;
-    //  - nested functions (tryCompileInlinedCall refuses those across classes anyway).
+    // Luwu Classes (rfcs/classes.md): if `method` of `cls` is inlined into code outside `cls`, does it still
+    // behave exactly as the call would, as far as `accessClass`'s private members go?
+    //
+    // Private access is authorized at runtime against the *running* closure. For inlined code, that is the
+    // caller's closure, not the method's. This goes wrong in two ways:
+    //  - With `accessClass` = cls: a runtime-checked access in the body that could reach one of cls's private
+    //    members would raise, where the call would have succeeded.
+    //  - With `accessClass` = the caller's class: a runtime-checked access that could reach one of the caller's
+    //    private members would succeed, where the call would have raised.
+    //
+    // The body may touch private members only through its own proven `self`. Those accesses compile to a
+    // constant offset with no runtime check (see inlineProvenSelfClass). The visitor refuses:
+    //  - a name private to accessClass, unless it is a read or a non-`const` write of an instance field of the
+    //    proven `self`. So private methods and statics are refused even on `self`, and so is a write to a
+    //    private `const` field, which stays runtime-checked.
+    //  - constructing accessClass through a private constructor, because NEWOBJECT's check would see the caller.
+    //  - a possible POD construction of a possible object (PodConstructionVisitor).
+    //  - indexing with a runtime key (`x[k]`), unless `x` is known not to be an object, because `k` could name a
+    //    private member. When checking `accessClass` = cls, "known" trusts declared table types
+    //    (`inner: { T }`). A declaration that lies can then make the inlined body raise where the call wouldn't.
+    //    It can never make the body succeed where the call would raise. That is why declarations are not trusted
+    //    when checking the caller's class.
+    //  - nested functions. tryCompileInlinedCall already refuses those across classes.
     struct InlinedPrivateAccessVisitor : PodConstructionVisitor
     {
         using PodConstructionVisitor::visit;
@@ -2084,20 +2101,26 @@ struct Compiler
 
         if (FFlag::DebugLuauUserDefinedClasses && func->args.size > 0)
         {
-            // Luwu Classes (rfcs/classes.md): an inlined method body can receive a `self` of another class, when the
-            // receiver's class came from an annotation (trusted tier, see ReceiverClass). For example, a VecDeque
-            // passed to
+            // At O2 an inlined method body can receive a `self` of a class other than the method's, which this check rejects.
+            // This can be because `self` is annotated incorrectly or in the more common case that the wrong type of `self` was passed to a free function
+            // that directly calls methods on `self`:
             //
             // const function push(list: List, first: string, last: string)
             //     list:push(first)
             //     list:push(last)
             // end
             //
-            // runs `VecDeque:push` at O0/O1, but O2 inlined `List:push`. The inline site's CHECKSELFCLASS raises
-            // instead of dispatching to the right method: a fallback call would keep a dead copy of the body at
-            // every site, and the error tells the user that the annotation or call site is wrong and not getting
-            // the O2 optimization it asked for. The message does not call the annotation a lie or an attempt to
-            // bypass private access, since a mistake at one call site reads the same.
+            // we'll try to inline `list:push` here but when called with a `self` of the wrong class (like a VecDeque maybe) that also has `:push`
+            // we correctly namecall to `VecDeque:push` in O0 and O1 but would incorrectly inline `List`'s implementation of `:push` in O2.
+            // I chose to error for this instead of simply jumping over the wrong instructions because it means we'd allow a lot of unused instructions
+            // that only get jumped over, and the user's code is wrong in that they called a method with the wrong type...
+            //
+            // If the user wants --!optimize 2 optimizations, they probably want to know that they have code that isn't getting those optimizations
+            // due to an incorrect callsite or annotation. We can't say that the type annotation we used to inline the method was 'wrong' or 'lying'
+            // or was an 'attempt to bypass private access' because it could've just as well been a simple mistake at a callsite that wants to use
+            // --!optimize 2 inlining (or they're using a runtime that just enabled o2 by default and didn't even know this could happen).
+            //
+            // Since Luwu is more okay with being stricter than Luau I felt this was a reasonable decision to catch incorrect code.
             if (const SelfClassCheck* selfCheck = classMethodSelfChecks.find(func); selfCheck && !selfIsAlreadyChecked(func, selfExpr))
             {
                 RegScope rsCheck(this);
@@ -2154,8 +2177,9 @@ struct Compiler
 
         if (FFlag::LuwuDefaultArguments)
         {
-            // Luwu (default arguments): the defaults are compiled in this frame, where a constant local they read
-            // has no register (it was folded away) and is no upvalue either, so they are folded like the body.
+            // Luwu (default arguments): the parameter defaults are compiled in this frame, like the inlined body.
+            // A constant local that a default reads has no register here, because it was folded away, and it
+            // isn't an upvalue either. So the defaults are constant-folded the same way as the body.
             for (AstExpr* defaultValue : func->argsDefaults)
                 if (defaultValue)
                     foldConstants(
@@ -2279,10 +2303,13 @@ struct Compiler
         Compile::undoChanges(locstants, localChanges);
     }
 
-    // Resolve a type annotation naming a declared class to its declaration (no module prefix, so
-    // `Vector2` and `List<number>` resolve but `M.Vector2` doesn't). A name that is also declared as a type
-    // alias or generic parameter anywhere in the module (typeNamesShadowingClasses) doesn't resolve: the
-    // compiler has no type scopes, and `type Node = other.Node` inside a function names another class.
+    // Resolve a type annotation naming a declared class to its declaration. Only unprefixed names resolve:
+    // `Vector2` and `List<number>` do, `M.Vector2` doesn't.
+    //
+    // A name that is also declared anywhere in the module as a type alias or generic parameter
+    // (typeNamesShadowingClasses) doesn't resolve. The compiler has no type scopes, so it can't tell which
+    // declaration a name means at a given point. For example, after `type Node = other.Node` inside a
+    // function, `Node` there names a different class than the module's `Node`.
     AstStatClass* classFromType(AstType* ty)
     {
         if (!ty)
@@ -2661,15 +2688,19 @@ struct Compiler
     }
 
     // Luwu Classes (rfcs/classes.md): can a primary constructor's parameter defaults and field initializers
-    // be compiled at the construction site rather than inside the synthesized `__init`?
-    //  - Only the constructor's own parameters, globals and constants can be named from the site. Any other
-    //    local would be an upvalue of `__init`, which the site has no way to name, and a closure could
-    //    capture one without naming it at all. `...` would be the site's own.
-    //  - Private access is authorized against the running closure, which is the site's instead of
-    //    `__init`'s. The two agree when the site is lexically inside the class. Anywhere else, an initializer
-    //    may not name a member that is private to the class or to the site's class, index with a runtime key
-    //    that could name one, construct either class through a private constructor, or construct a POD class
-    //    from something that might be an object (PodConstructionVisitor).
+    // be compiled at the construction site instead of inside the synthesized `__init`? Two things could
+    // change their meaning at the site:
+    //  - Names. The site can only name the constructor's own parameters, globals and constants. Any other
+    //    local would be an upvalue of `__init`, which the site has no way to name. A closure could capture
+    //    such a local without naming it, so function expressions are refused too. `...` would refer to the
+    //    site's own varargs.
+    //  - Private access. It is authorized against the running closure, which is the site's closure instead
+    //    of `__init`'s. The two agree when the site is lexically inside the class. Anywhere else, an
+    //    initializer may not:
+    //      - name a member that is private to the class or to the site's class,
+    //      - index with a runtime key, which could name such a member,
+    //      - construct either class through a private constructor,
+    //      - construct a POD class from something that might be an object (PodConstructionVisitor).
     struct PrimaryInitInlineVisitor : PodConstructionVisitor
     {
         using PodConstructionVisitor::visit;
@@ -2694,8 +2725,9 @@ struct Compiler
             return self->classMemberIsPrivate(decl, name) || (siteClass && self->classMemberIsPrivate(siteClass, name));
         }
 
-        // The initializers may be moved when they mean the same at the site. A POD construction reads private
-        // fields only of a class that has some, so it matters only when this class or the site's does.
+        // True when the initializers mean the same at the site as they do in `__init`. A possible POD
+        // construction (mayConstructPod) only changes that when this class or the site's class has private
+        // members, because a POD constructor can only read private fields of a class that declares some.
         bool movable() const
         {
             bool eitherHasPrivateMembers =
@@ -3079,10 +3111,11 @@ struct Compiler
         }
     };
 
-    // Luwu Classes (rfcs/classes.md): the register holding the class a construction's callee names, for
-    // NEWOBJECT's class operand. NEWOBJECT takes that operand on trust, so where the binding may still be
-    // nil (isClassBoundAt) this also emits the check that raises what calling it would: an ordinary CALL of
-    // the nil value. The callers compile it after the arguments, which a call evaluates before it raises.
+    // Luwu Classes (rfcs/classes.md): the register holding the class that a construction's callee names,
+    // used as NEWOBJECT's class operand. NEWOBJECT doesn't check that operand. So where the binding may still
+    // be nil (isClassBoundAt), this also emits a nil check that does an ordinary CALL of the nil value, which
+    // raises the same error calling it would. The callers compile this after the arguments, because a call
+    // evaluates its arguments before it raises.
     uint8_t compileClassOperand(AstExpr* callee, RegScope& rs)
     {
         AstLocal** classLocal = classLocals.find(callee->as<AstExprGlobal>()->name);
@@ -3570,9 +3603,10 @@ struct Compiler
                 Variable* ul = variables.find(uv);
                 bool immutable = applyClassFinalizationGate(uv, !ul || !ul->written);
 
-                // getUpval can't see classLocalFinalized (nested bodies compile before any class is
-                // finalized -- see its own comment), so a REF capture of an as-yet-unfinalized class
-                // local is only ever recognized here; make sure closeLocals still emits CLOSEUPVALS
+                // getUpval can't take classLocalFinalized into account, because nested function bodies
+                // are compiled before any class is finalized (see getUpval's comment). So this is the only
+                // place that recognizes a REF capture of a class local that isn't finalized yet. Mark the
+                // local captured so closeLocals still emits CLOSEUPVALS for it.
                 if (!immutable)
                     locals[uv].captured = true;
 
@@ -3828,7 +3862,7 @@ struct Compiler
         checkConstant(classConst, decl->location);
         bytecode.patchAux(auxOffset, classConst);
 
-        if (FFlag::LuauExportedClassIsNilWorkaround && decl->exported)
+        if (FFlag::LuwuExportedClassIsNilWorkaround && decl->exported)
         {
             // ERIN: Temporary workaround for bug where exported class is `nil` within the class scope (methods etc)
             // We assign it to the export table immediately after the declaration, whereas normally that would only
@@ -3991,10 +4025,11 @@ struct Compiler
     // one, or one of the class's own members, which the declaration creates after assigning the binding.
     // Code before it -- an earlier function, an earlier class's methods -- may run first and see nil.
     //
-    // Inlining keeps this sound: a function can only be inlined through a local binding, which is visible
-    // only after its declaration, so a body after the class is only ever inlined into code after it. A
-    // method is inlined into code holding one of its class's instances, except through an annotation,
-    // which tryResolveMethodCall checks.
+    // Inlining doesn't break this. A function can only be inlined through a local binding, and that binding
+    // is only visible after its declaration. So a function body written after the class is only ever inlined
+    // into code that also comes after the class. A method is only inlined into code that holds an instance of
+    // its class, and an instance means the declaration has already run. The exception is a receiver known
+    // only from an annotation, and tryResolveMethodCall checks isClassBoundAt for that case.
     bool isClassBoundAt(AstExpr* node)
     {
         AstStatClass* decl = classBindingOf(node);
@@ -4016,10 +4051,11 @@ struct Compiler
     // The proof must not depend on `assert` raising: an unsafe environment can replace it with a function
     // that returns. compileAssertIsinstanceRecheck therefore follows the call with a check that raises.
     //
-    // The operands are evaluated again on the failing path, so this only fuses ones that can be read again
-    // with no consequence, which is the shape the idiom has anyway (the proof needs a local, and a class
-    // binding is a local or an upvalue). The remaining arguments are skipped on the passing path, so they
-    // must have no side effects either.
+    // On the failing path, the `class.isinstance` operands are evaluated a second time. So this only fuses
+    // operands that can be read again with no side effects: a local, a constant, or a class binding (see
+    // fusableAssertIsinstance). The idiom already has that shape, since the proof needs a local and a class
+    // binding is a local or an upvalue. The assert's remaining arguments, such as a custom message, are
+    // skipped on the passing path, so they must have no side effects either.
     //
     // Returns the fused `class.isinstance` call, leaving the jump's label in `skipJump` for the caller to
     // patch to the instruction after the call, or null when nothing was emitted.
@@ -4225,10 +4261,11 @@ struct Compiler
         if (!isFrameLocal(le))
             return nullptr;
 
-        // A write from a function nested inside this one runs whenever that closure is called, so no
-        // region of this function excludes it and no proof about this local can stand. (A write in this
-        // frame is the caller's problem: it can be located, so a region that contains none of them is
-        // safe -- see the callers.)
+        // A write from a function nested inside this one runs whenever that closure is called. No region
+        // of this function excludes it, so no proof about this local can stand.
+        //
+        // Writes in this frame are left to the callers. Each one has a location in the source, so a
+        // caller only has to check that its region contains none of them.
         //
         // Getting this wrong is not a missed optimization: the inline site skips CHECKSELFCLASS for a
         // proven receiver, so a stale proof would read constant field offsets off whatever the local now
@@ -7272,16 +7309,18 @@ struct Compiler
         l.debugpc = bytecode.getDebugPC();
         l.allocpc = allocpc == kDefaultAllocPc ? l.debugpc : allocpc;
 
-        // A local's register is allocated before its initializer runs, and the initializer may use it as a
-        // temporary: `local l: List<number> = List.new()` loads the *class* into l's register first. Codegen
-        // trusts a declared type over what it computed (getRegTag) and guards it with a VM exit, so a declared
-        // range that covers the initializer exits on every run -- and the rest of that call runs interpreted.
-        // A declared type only describes the value the initializer leaves behind, so its range starts there.
+        // A local's register is allocated before its initializer runs, and the initializer may use that
+        // register as a temporary. For example, `local l: List<number> = List.new()` first loads the *class*
+        // into l's register. Codegen prefers a declared type over the type it computed (getRegTag) and guards
+        // it with a VM exit. If the declared range covers the initializer, that guard fails on every run, and
+        // the rest of that function call runs interpreted. A declared type only describes the value the
+        // initializer leaves behind, so the range starts after the initializer.
         //
-        // Only for class-typed locals: upstream's ranges (numbers, vectors, host userdata) keep the early start,
-        // which codegen also uses to refine `any` ranges at the writing instruction, and changing them would
-        // rewrite upstream's IR. A class-typed local is the case that hits this in practice, since it is
-        // usually initialized through the class value (`Class.new()`, `List.with_capacity(n)`).
+        // This applies only to class-typed locals. Upstream's ranges (numbers, vectors, host userdata) keep
+        // the early start at allocation. Codegen also uses that early start to refine `any` ranges at the
+        // writing instruction, so changing it would change upstream's IR. Class-typed locals are the case
+        // that hits this in practice, because they are usually initialized through the class value
+        // (`Class.new()`, `List.with_capacity(n)`).
         if (LuauBytecodeType* ty = localTypes.find(local); ty && *ty == LBC_TYPE_OBJECT)
             l.allocpc = l.debugpc;
     }
@@ -7654,15 +7693,18 @@ struct Compiler
         AstExpr* value;
     };
 
-    // Finds each class's user-defined `__init` (if any) together with the default value
-    // expressions of its fields, so that compileFunction can inline `self.field = defaultExpr`
-    // assignments at the top of `__init`'s body -- before the user's own statements -- with no
-    // extra runtime call. For classes with no custom `__init` but at least one field default, it
-    // instead synthesizes a niladic `__defaults` function (returning each field's default, nil
-    // where unset, in declaration order) and appends it to `functionsToCompile` so it gets a Proto
-    // like any other function; compileClassDeclaration wires it in as a private static member for
-    // the POD constructor to call. Must run before functions are compiled (see the `functions`
-    // loop in compileOrThrow), since by that point `__init`'s Proto is already being emitted.
+    // Finds each class's user-defined `__init`, if any, together with the default value expressions
+    // of its fields. compileFunction then compiles `self.field = defaultExpr` assignments at the top
+    // of `__init`'s body, before the user's own statements, with no extra runtime call.
+    //
+    // A class with no custom `__init` but at least one field default gets a synthesized niladic
+    // `__defaults` function instead, unless every default is a constant (see classPodConstDefaults).
+    // `__defaults` returns each field's default in declaration order, with nil where a field has none.
+    // It is appended to `functionsToCompile`, so it gets a Proto like any other function, and
+    // compileClassDeclaration registers it as a private static member for the POD constructor to call.
+    //
+    // This must run before functions are compiled (see the `functions` loop in compileOrThrow),
+    // because compileFunction needs these defaults when it compiles `__init`.
     struct ClassInitDefaultsVisitor : AstVisitor
     {
         Allocator& allocator;
@@ -7721,13 +7763,13 @@ struct Compiler
             return AstArray<AstExpr*>{data, sizeof...(Args)};
         }
 
-        // Builds the CHECKSELFCLASS data for a method, spliced in as the very first statement of a
-        // method's body by compileFunction. Runtime checking of `self` for methods (see
-        // rfcs/classes.md) has to live here -- inlined into the method's own bytecode -- rather than
-        // as a check at the call boundary, because a call-boundary check is trivially skipped when
-        // the compiler inlines the call (dot-call sites like `SomeClass.method(notAnInstance)` are
-        // exactly the ones eligible for inlining). Splicing it into the body means inlining copies
-        // the check along with everything else.
+        // Builds the data for a method's CHECKSELFCLASS (runtime checking of `self` for methods, see
+        // rfcs/classes.md). compileFunction emits the check as the first instruction of the method's
+        // body, and compileInlinedCall emits the same check at each inline site of the method.
+        //
+        // The check belongs to the method rather than to its call sites. A check at the call boundary
+        // would be skipped whenever the compiler inlines the call, and dot-call sites like
+        // `SomeClass.method(notAnInstance)` are exactly the ones eligible for inlining.
         SelfClassCheck buildSelfCheckStat(AstStatClass* node, const AstClassMethod& method)
         {
             // the check belongs to this method, so point its debug info at the method's own name

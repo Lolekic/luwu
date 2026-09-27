@@ -1967,9 +1967,9 @@ void IrLoweringX64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
     }
     case IrCmd::CLASS_ISINSTANCE:
     {
-        // result = (tag == object) && (value->lclass == class); the deref is guarded by the tag check
-        // constant propagation can replace the tag with a known constant (e.g. after CHECKSELFCLASS
-        // has already established that the value is an object), in which case the guard folds away
+        // result = (tag == object) && (value->lclass == class). The deref is guarded by the tag check.
+        // Constant propagation can replace the tag with a known constant (e.g. after CHECKSELFCLASS
+        // has established that the value is an object), and then the guard folds away.
         CODEGEN_ASSERT(OP_A(inst).kind == IrOpKind::Inst || OP_A(inst).kind == IrOpKind::Constant);
         bool knownTag = OP_A(inst).kind == IrOpKind::Constant;
 
@@ -2706,10 +2706,10 @@ void IrLoweringX64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
     }
     case IrCmd::OBJECT_MEMBER_ADDR:
     {
-        // Luwu Classes (rfcs/classes.md): the receiver's class is proven (see LOP_GETOBJECTMEMBER) or it was
-        // just allocated (NEW_OBJECT), so
-        // the member's offset is a constant and nothing needs re-checking here -- not the class, and
-        // not the offset against numberofmembers either. A single lea, with no load and no branch.
+        // Luwu Classes (rfcs/classes.md): the receiver's class is proven (see LOP_GETOBJECTMEMBER), or the
+        // object was just allocated (NEW_OBJECT). So the member's offset is a constant, and nothing needs
+        // re-checking here: not the class, and not the offset against the member count. A single lea, with
+        // no load and no branch.
         inst.regX64 = regs.allocReg(SizeX64::qword, index);
 
         uint32_t offset = uintOp(OP_B(inst));
@@ -2721,11 +2721,12 @@ void IrLoweringX64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
     }
     case IrCmd::CHECK_CLASS_FIELDS_CONSTRUCTIBLE:
     {
-        // The runtime conditions of executeNEWOBJECT's member-copy case (see IrData.h); the class's shape
-        // is the compiler's guarantee. A custom `__init` here is always a primary constructor. Whether it
-        // is private is read from its own member flag, and a private one is allowed when the executing
-        // closure belongs to the class -- luaR_checkprivateconstructor's rule, read the same way
-        // emitClassMemberAuthX64 reads it (native code always runs a Lua closure).
+        // The runtime conditions of executeNEWOBJECT's member-copy case (see IrData.h). The class's
+        // shape is guaranteed by the compiler. A custom `__init` that reaches this check is always a
+        // primary constructor. Whether it is private is read from its own member flag. A private one is
+        // allowed when the executing closure belongs to the class, which is luaR_checkprivateconstructor's
+        // rule. The owner is read the same way emitClassMemberAuthX64 reads it; native code always runs a
+        // Lua closure, so there is no C-closure case.
         Label fresh;
         Label& fail = getTargetLabel(OP_B(inst), index, fresh);
         RegisterX64 classReg = regOp(OP_A(inst));
@@ -2940,12 +2941,15 @@ void IrLoweringX64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
         break;
     case IrCmd::BARRIER_OBJ:
     {
-        // Inlined (not via callBarrierObject) so the call wrapper can be given this instruction's
-        // index and the real SSA object operand OP_A(inst): the wrapper's last-use logic then clears
-        // inst->regX64 when it consumes the object register, so freeLastUseRegs doesn't later free it
-        // a second time. callBarrierObject builds its own wrapper without an instIdx and so can't
-        // accept a tracked operand -- it only fits callers passing an untracked/released register
-        // (e.g. SET_UPVALUE). This mirrors BARRIER_TABLE_FORWARD exactly, only the barrier fn differs.
+        // Written out here instead of calling callBarrierObject, so that the call wrapper gets this
+        // instruction's index and the real SSA object operand OP_A(inst). With those, the wrapper's
+        // last-use logic clears inst->regX64 when it consumes the object register, and freeLastUseRegs
+        // doesn't free that register a second time later.
+        //
+        // callBarrierObject builds its own wrapper with no instruction index, so it can't take a
+        // tracked operand. It only suits callers that pass an untracked or already released register,
+        // such as SET_UPVALUE. This is the same code as BARRIER_TABLE_FORWARD except for the barrier
+        // function it calls.
         Label skip;
 
         ScopedRegX64 tmp{regs, SizeX64::qword};

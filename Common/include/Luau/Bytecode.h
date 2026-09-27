@@ -493,13 +493,15 @@ enum LuauOpcode
     // exactly that class.
     // A: value register
     // D: jump offset
-    // AUX: class register in the low 8 bits; bits 8..29 are 0;
-    //      bit 31 is LBC_JUMPXISA_JUMPIFINSTANCE -- when set, jump if the value IS an instance of the class,
-    //      when clear, jump if it is NOT. This is the bit JUMPXEQK* call NOT (LUAU_INSN_AUX_NOT reads it) with
-    //      the opposite meaning: for JUMPXEQK* a set bit negates the comparison, here it asks for a match;
-    //      bit 30 is LBC_JUMPXISA_CHECKCLASS -- when set, the class register may hold any value (a class
-    //      from another module, or a class used where its declaration may not have run yet) and a non-class
-    //      raises the builtin's error; when clear, the register holds a class and the VM only asserts it
+    // AUX: the class register in bits 0..7, and two flags. Bits 8..29 are 0.
+    //   bit 31, LBC_JUMPXISA_JUMPIFINSTANCE: when set, jump if the value IS an instance of the class. When
+    //       clear, jump if it is NOT. JUMPXEQK* uses the same bit as its NOT flag (LUAU_INSN_AUX_NOT reads it),
+    //       but with the opposite sense: there a set bit negates the comparison, here a set bit means "jump
+    //       on a match".
+    //   bit 30, LBC_JUMPXISA_CHECKCLASS: when set, the class register may hold any value, and a non-class
+    //       raises the builtin's error. This covers a class from another module, or a class used where its
+    //       declaration may not have run yet. When clear, the register holds a class and the VM only
+    //       asserts it.
     LOP_JUMPXISA,
 
     // NEWOBJECT: allocate an instance of a class, initialized according to C (below).
@@ -526,16 +528,17 @@ enum LuauOpcode
     // GETOBJECTMEMBER: read an instance member at a known offset, for a receiver whose class the
     // compiler has *proven* with a runtime check, and which nothing can reassign while the proof holds:
     //   - a method's own `self`, checked by the method's CHECKSELFCLASS prologue;
-    //   - an inlined method's `self`, checked by the CHECKSELFCLASS emitted at the inline site, or, with no check
-    //     emitted, by a proof the receiver already has: this code constructed it (`local c = C()`), or it is
-    //     covered by `class.isinstance(c, C)` in an `if` or an `assert`;
+    //   - an inlined method's `self`. Either the inline site emitted a CHECKSELFCLASS for it, or no check was
+    //     emitted because the receiver was already proven: this code constructed it (`local c = C()`), or it
+    //     is covered by `class.isinstance(c, C)` in an `if` or an `assert`;
     //   - a local in the then-branch of `if class.isinstance(local, C)`, or in the statements after
     //     `assert(class.isinstance(local, C))` in the same block (JUMPXISA against a class declared in
     //     this module).
     // The member's offset is its index in declaration order, so none of GETTABLEKS's per-access work is
     // needed: no slot cache, no bounds check, no name compare and no private-access check. A private member
-    // is only emitted this way through a proven `self` (whose body is the class's own code) or from inside
-    // one of the class's methods. That B holds an object with a member at AUX is asserted, not checked.
+    // is only accessed this way through a proven `self`, whose method body is the class's own code, or from
+    // inside one of the class's methods. The VM asserts, but does not check, that B holds an object with a
+    // member at AUX.
     // A: target register
     // B: register holding the object
     // AUX: member offset

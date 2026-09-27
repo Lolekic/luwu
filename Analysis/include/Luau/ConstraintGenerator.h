@@ -139,7 +139,7 @@ struct ConstraintGenerator
     DenseHashMap<const AstStatTypeAlias*, ScopePtr> astTypeAliasDefiningScopes{nullptr};
 
     // The private scope of an extern type declaration, used to resolve type references
-    // (e.g. a generic method's own type parameters) within its body. See LuauExternTypeUseDefinitionScope.
+    // (e.g. a generic method's own type parameters) within its body. See LuwuExternTypeUseDefinitionScope.
     DenseHashMap<const AstStatDeclareExternType*, ScopePtr> astExternTypeDefiningScopes{nullptr};
     DenseHashMap<const AstStatClass*, ScopePtr> astClassDefiningScopes{nullptr};
 

@@ -740,11 +740,14 @@ enum class IrCmd : uint8_t
     // B: unsigned int (member offset)
     OBJECT_MEMBER_ADDR,
 
-    // Luwu Classes (rfcs/classes.md): guard that a class can be constructed natively by NEWOBJECT's FIELDS
-    // form as nothing but a member-by-member copy. The compiler guarantees the class's shape (see
-    // VM_CASE(LOP_NEWOBJECT)); what is left to check at runtime is that the class has no constant default
-    // to preserve, and that its `__init`, if private, is used from inside the class
-    // (luaR_checkprivateconstructor's rule; from outside the fallback raises). Jumps otherwise.
+    // Luwu Classes (rfcs/classes.md): guard that NEWOBJECT's FIELDS form can construct this class
+    // natively, as a plain member-by-member copy. The compiler guarantees the class's shape (see
+    // VM_CASE(LOP_NEWOBJECT)). Two things are left to check at runtime:
+    //  - the class has no constant defaults to preserve, and
+    //  - if its `__init` is private, the construction happens inside the class
+    //    (luaR_checkprivateconstructor's rule).
+    // Jumps if either check fails. For a private constructor used from outside the class, the fallback
+    // then raises the error.
     // A: pointer (LuauClass)
     // B: block/vmexit/undef
     // When undef is specified instead of a block, execution is aborted on check failure
@@ -967,11 +970,11 @@ enum class IrCmd : uint8_t
     // C: block
     FALLBACK_FORGPREP,
 
-    // Luwu Classes (rfcs/classes.md): construct an instance of a statically resolved class. Forms the
-    // native lowering doesn't handle, and its guard misses, run through the same C implementation the
-    // interpreter uses, which keeps native execution going afterwards instead of abandoning the rest
-    // of the function to the interpreter (and, unlike a bare exit, keeps the register liveness
-    // honest).
+    // Luwu Classes (rfcs/classes.md): construct an instance of a statically resolved class, using the
+    // same C implementation the interpreter uses. It covers the forms the native lowering doesn't
+    // handle, and the cases where the native lowering's guard misses. Unlike a bare exit, native
+    // execution continues after it instead of leaving the rest of the function to the interpreter, and
+    // register liveness stays honest.
     // A: unsigned int (bytecode instruction index)
     // B: Rn (instance destination, also the base of the constructor's register window)
     // C: Rn (class)

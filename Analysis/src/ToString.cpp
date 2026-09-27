@@ -168,12 +168,12 @@ struct StringifierState
 
     DenseHashMap<TypeId, std::string> cycleNames{{}};
     DenseHashMap<TypePackId, std::string> cycleTpNames{{}};
-    // Luwu: the subset of the two maps above that was actually emitted. A `where` clause should
-    // define the names the reader can see and nothing else: a cycle can be *found* by
-    // findCyclicTypes and then never printed, because the root short-circuited to its own name or
-    // the occurrence sat inside a part that was truncated. Defining those produced a `where` with
-    // bindings for names that appear nowhere -- and, when every one of them was unused, the bare
-    // dangling `Request where ` with nothing after it at all.
+    // Luwu: the subset of the two maps above that was actually emitted. A `where` clause defines only
+    // these names, the ones the reader can see. findCyclicTypes can find a cycle that is never
+    // printed: the root may short-circuit to its own name, or the occurrence may sit inside a
+    // truncated part. Upstream defines every cycle it named. That gives a `where` clause with
+    // bindings for names that appear nowhere, or, when none of them is used, a dangling
+    // `Request where ` with nothing after it.
     DenseHashSet<TypeId> usedCycleNames{nullptr};
     DenseHashSet<TypePackId> usedCycleTpNames{nullptr};
     Set<void*> seen{{}};
@@ -1170,11 +1170,12 @@ struct TypeStringifier
             return;
         }
 
-        // The `typeof(setmetatable(...))` class idiom reaches itself through every method's `self`,
-        // so expanding one -- at the root, or in a `where` clause body, where the name above is
-        // deliberately bypassed -- can arrive back here. Every other name-carrying variant guards
-        // that; this one did not, and only the cycle-name short-circuit in `stringify` kept it from
-        // recursing forever.
+        // The `typeof(setmetatable(...))` class idiom reaches itself through every method's `self`.
+        // So expanding one can arrive back here. That happens at the root, or in a `where` clause
+        // body, where the name check above is deliberately bypassed. Every other printer for a type
+        // that can carry a name guards against this.
+        // Luwu: upstream's MetatableType printer has no such guard. Only the cycle-name short-circuit
+        // in `stringify` keeps it from recursing forever.
         if (state.hasSeen(&mtv))
         {
             if (emitRecursiveAliasName(ty, std::nullopt, mtv.syntheticName))
@@ -1944,14 +1945,14 @@ static void assignCycleNames(
             continue;
         }
 
-        // Luwu: the named-table case above covers only TableType, but every other variant that can
-        // be the target of an alias carries a name too, and the idioms Luau OOP is actually written
-        // in land on those: `typeof(setmetatable(...))` is a MetatableType, and
-        // `typeof(X.Prototype) & { ... }` an IntersectionType. Both recurse through every method's
-        // `self`, so both are *always* cyclic -- which made them the shapes that could never print
-        // as their own name, leaving a table of them reading as `t65` repeated. Each of these
-        // printers has its own name short-circuit and its own hasSeen guard, so leaving them
-        // unnamed here is safe, exactly as it is for a named table.
+        // Luwu: the named-table case above only covers TableType. Every other type that can be the
+        // target of an alias also carries a name, and the common Luau OOP idioms produce those types:
+        // `typeof(setmetatable(...))` is a MetatableType, and `typeof(X.Prototype) & { ... }` is an
+        // IntersectionType. Both reach themselves through every method's `self`, so both are always
+        // cyclic. Upstream gives them a cycle name like any other cycle, so they never print as their
+        // own name, and a table of them reads as `t65` repeated. Each of these printers has its own
+        // name short-circuit and its own hasSeen guard, so leaving them unnamed here is as safe as it
+        // is for a named table.
         if (!exhaustive)
         {
             TypeId cycleTyFollowed = follow(cycleTy);
@@ -1963,20 +1964,21 @@ static void assignCycleNames(
 
             if (auto mtv = get<MetatableType>(cycleTyFollowed); mtv && mtv->syntheticName)
                 continue;
-            // UnionType and FunctionType are deliberately not here, and both are worth explaining,
-            // because the reasoning bounds how far this can be taken:
+            // UnionType and FunctionType are deliberately left out here. Each has its own reason,
+            // and those reasons limit how far this approach can go:
             //
-            //  - A named type that still ends up *expanded* -- as the root, or as a `where` clause
-            //    body -- reaches its own recursive reference with `exhaustive` set, where
-            //    `emitRecursiveAliasName` declines and the printer emits `*CYCLE*`. `*CYCLE*` says
-            //    less than `t1` did, so for shapes that are routinely expanded this is a downgrade.
-            //    `RefinementTest.cannot_call_a_function_union` pins exactly that for a named union.
-            //  - A self-recursive function alias is its own root, so `suppressNameFor` makes
-            //    `willPrintAsBareName` answer false and the union/intersection printers parenthesize
-            //    what they no longer find in `cycleNames` (`(F)?` where `t1?` used to do).
+            //  - A named type can still be *expanded*: as the root, or as a `where` clause body. The
+            //    expansion then reaches the type's own recursive reference with `exhaustive` set.
+            //    `emitRecursiveAliasName` declines there, so the printer emits `*CYCLE*`, which says
+            //    less than a cycle name like `t1`. For types that are routinely expanded, skipping
+            //    the cycle name is a downgrade. `RefinementTest.cannot_call_a_function_union` pins
+            //    this for a named union.
+            //  - A self-recursive function alias is its own root. `suppressNameFor` then makes
+            //    `willPrintAsBareName` answer false. Because the type is not in `cycleNames`, the
+            //    union and intersection printers wrap it in parentheses: `(F)?` instead of `t1?`.
             //
-            // The two kept here are the ones written as classes, which are read far more often than
-            // they are expanded.
+            // The two types that are skipped (the metatable above, the intersection below) are the
+            // shapes class idioms produce. Those are read far more often than they are expanded.
             if (isNamed(get<IntersectionType>(cycleTyFollowed)))
                 continue;
         }
@@ -2036,11 +2038,13 @@ static void tableTypeToStringDetailed(
     tvs.stringify(ttv->instantiatedTypeParams, ttv->instantiatedTypePackParams);
 }
 
-// Luwu: appends ` where t1 = ... ; t2 = ...` defining the cycle names the text printed so far used,
-// and only those, repeating until the bodies stop introducing new ones (a body can reference another
-// cycle). Nothing is appended when no name was used. `bypassOwnNameOnly` is whether a body may keep
-// other named types as names (only safe where this clause can define them); otherwise each body is
-// expanded exhaustively.
+// Luwu: appends ` where t1 = ... ; t2 = ...`, defining the cycle names that the text printed so far
+// actually used, and only those. A body can reference another cycle, so this repeats until the
+// bodies introduce no new names. Nothing is appended when no name was used.
+//
+// `bypassOwnNameOnly` controls how each body is expanded. When true, a body bypasses only its own
+// name and keeps other named types as names; this is only safe where the clause can also define
+// them. When false, each body is expanded exhaustively.
 static void emitUsedCycleDefinitions(StringifierState& state, TypeStringifier& tvs, bool bypassOwnNameOnly)
 {
     TypePackStringifier tps{state};
@@ -2105,15 +2109,17 @@ static void emitUsedCycleDefinitions(StringifierState& state, TypeStringifier& t
             appendBody(
                 [&]()
                 {
-                    // Expand this cycle with only *its own* name bypassed, rather than switching
-                    // names off wholesale: `exhaustive` suppresses every name, so a body mentioning
-                    // another named type re-expanded it (`Cache<K, V>` printed as
-                    // `t1 & { store: { [K]: V } }`) and one message could spell a type two ways.
+                    // Expand this cycle with only its own name bypassed, so any other named type in
+                    // the body still prints as its name. Setting `exhaustive` would suppress every
+                    // name instead: a body that mentions another named type would expand that type
+                    // too (`Cache<K, V>` as `t1 & { store: { [K]: V } }`), and one message could
+                    // spell the same type two ways.
                     //
-                    // Only safe where this printer can also define the names it uses -- that is what
-                    // `includeWhereClauses` means. Without it, a corecursive pair would print
-                    // `t1 = () -> (number, B)` with `B` defined nowhere, which says less than
-                    // expanding it did (see `corecursive_function_types`).
+                    // This is only safe when the printer can also define the names it uses, which is
+                    // what `includeWhereClauses` means. Without it, a pair of corecursive types would
+                    // print `t1 = () -> (number, B)` with `B` defined nowhere, which says less than a
+                    // full expansion. So in that case the body is expanded with `exhaustive`
+                    // (see `corecursive_function_types`).
                     std::optional<TypeId> savedSuppress = state.suppressNameFor;
                     const bool savedExhaustive = state.exhaustive;
 
@@ -2331,11 +2337,12 @@ ToStringResult toStringDetailed(TypePackId tp, ToStringOptions& opts)
     else
         tvs.stringify(tp);
 
-    // Luwu: same as the TypeId overload -- define only the cycle names that actually reached the
-    // output, iterating until the bodies stop introducing new ones. This one tested `cycles` (every
-    // cycle *found*) rather than `cycleNames` (every cycle actually *named*), and those differ:
-    // assignCycleNames deliberately leaves a named type unnamed so it can print as its own name. A
-    // root that did exactly that produced ` where ` followed by nothing at all.
+    // Luwu: same as the TypeId overload. Define only the cycle names that reached the output, and
+    // repeat until the bodies introduce no new ones.
+    // Upstream's TypePackId overload decides whether to emit a `where` clause from `cycles` (every
+    // cycle found) instead of `cycleNames` (every cycle given a name). Those differ, because
+    // assignCycleNames deliberately leaves a named type unnamed so that it prints as its own name. For
+    // a root like that, upstream prints ` where ` followed by nothing.
     TypePackStringifier tps{tvs.state};
 
     std::vector<std::pair<std::string, std::string>> whereEntries;

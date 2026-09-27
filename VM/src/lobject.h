@@ -414,16 +414,18 @@ typedef struct Proto
 
     void* userdata;
 
-    // Luwu Classes (rfcs/classes.md): for a proto that is one of a class's own methods (including
-    // __init / __defaults) or is lexically nested anywhere inside one, the class it belongs to;
-    // NULL otherwise. Set (recursively, over the whole nested-proto tree) when the method closure is
-    // registered (luaR_addclassmember/luaR_stampownerclass) and GC-marked (traverseproto). Both the
-    // interpreter (luaR_closureownsprivateaccess) and native codegen use it to authorize
-    // private/const member access from inside the owning class's methods (and any closure nested in
-    // them) without needing to scan the class's static members: `object->lclass ==
-    // currentClosure->l.p->ownerclass` is exactly the "closure owns private access" test (method
-    // protos, and their nested protos, are unique per class), and const writes additionally require
-    // the closure to be the class's __init.
+    // Luwu Classes (rfcs/classes.md): the class this proto belongs to, or NULL. A proto belongs to a
+    // class if it is one of the class's own methods (including `__init` and `__defaults`), or if it is
+    // lexically nested anywhere inside one.
+    //
+    // It is set on the whole tree of nested protos when the method closure is registered
+    // (luaR_addclassmember, luaR_stampownerclass). It is GC-marked in traverseproto.
+    //
+    // The interpreter (luaR_closureownsprivateaccess) and native codegen both use it to authorize
+    // private and const member access without scanning the class's static members. Method protos and
+    // the protos nested in them are unique per class, so `object->lclass ==
+    // currentClosure->l.p->ownerclass` is exactly the "closure owns private access" test. A const write
+    // additionally requires the closure to be the class's `__init`.
     struct LuauClass* ownerclass;
 
     GCObject* gclist;

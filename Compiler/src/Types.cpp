@@ -1081,8 +1081,9 @@ struct TypeMapVisitor : AstVisitor
             else if (AstExprIndexName* indexName = node->func->as<AstExprIndexName>())
             {
                 // Luwu Classes (rfcs/classes.md): a static call on a class (`Account.new(...)`) whose declared
-                // return type names a class returns an object. Nothing checks that declaration, and a wrong
-                // hint sends the rest of every caller back to the interpreter, so it needs trust.
+                // return type names a class returns an object. Nothing checks that declared type. If it is
+                // wrong, codegen's guard on the hint fails and the rest of each calling function runs
+                // interpreted. So the result is only typed when annotations are trusted.
                 AstExprGlobal* classGlobal = indexName->expr->as<AstExprGlobal>();
 
                 if (classGlobal && trustsTypeAnnotations)

@@ -4639,8 +4639,8 @@ end
         "This class mixes explicit and implicit 'public'; put the 'public' or 'private' keyword in front of this field to prevent ambiguity"
     );
 
-    // ... and the parameter list is where the body's qualifiers reach, so a parameter qualified in
-    // neither place is reported by position
+    // ... and a property in the body can qualify a parameter (here `id` and `size`). `position` is
+    // qualified in neither place, so the error names it by its position in the parameter list
     matchParseError(
         R"(
 class Rectangle(position: vector, size: vector, id: number?)

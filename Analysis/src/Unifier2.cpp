@@ -96,11 +96,10 @@ static bool sameNominalExternTypeRoot(const ExternType* a, const ExternType* b)
     return a->name == b->name && a->definitionModuleName == b->definitionModuleName && a->definitionLocation == b->definitionLocation;
 }
 
-// Returns true if `sub` and `sup` form a genuine, meaningful pairing for union-member matching
-// purposes -- currently, two ExternTypes stemming from the same generic nominal declaration (see
-// LuwuGenericNominals). This is stricter than `areCompatible`, which only rules out impossible
-// pairings; this instead identifies pairings that should be preferred over unifying `sub` against
-// an unrelated free/generic catch-all member of the same union.
+// Returns true if `sub` and `sup` are a genuine match when matching union members. Today that means
+// two ExternTypes from the same generic nominal declaration (see LuwuGenericNominals). A genuine
+// match is preferred over unifying `sub` against an unrelated free or generic catch-all member of
+// the same union. This is stricter than `areCompatible`, which only rules out impossible pairings.
 static bool isGenuineUnionMatch(TypeId sub, TypeId sup)
 {
     sub = follow(sub);

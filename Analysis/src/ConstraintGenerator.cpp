@@ -51,7 +51,7 @@ LUAU_FLAGVERSION(LuauRemovePrimitiveTypeConstraintAndSubtypingUnifier, 2)
 LUAU_FASTFLAGVARIABLE(LuauDeprecatedAttributeOnAnonymousFunctions)
 LUAU_FASTFLAGVARIABLE(DebugLuauCFG)
 LUAU_FASTFLAG(LuwuDefaultArguments)
-LUAU_FASTFLAGVARIABLE(LuauExternTypeUseDefinitionScope)
+LUAU_FASTFLAGVARIABLE(LuwuExternTypeUseDefinitionScope)
 LUAU_FASTFLAG(LuwuGenericNominals)
 LUAU_FASTFLAG(DebugLuauCyclicRequireTypeInference)
 
@@ -1003,7 +1003,7 @@ void ConstraintGenerator::prototypeTypeDefinitions(const ScopePtr& scope, AstSta
 
             ScopePtr defnScope = childScope(classDeclaration, scope);
 
-            if (FFlag::LuauExternTypeUseDefinitionScope || FFlag::LuwuGenericNominals)
+            if (FFlag::LuwuExternTypeUseDefinitionScope || FFlag::LuwuGenericNominals)
                 astExternTypeDefiningScopes[classDeclaration] = defnScope;
 
             TypeId initialType = arena->addType(BlockedType{});
@@ -2478,9 +2478,9 @@ ControlFlow ConstraintGenerator::visit(const ScopePtr& scope, AstStatDeclareExte
     // Indexer and property types are resolved against the extern type's own definition scope
     // (rather than the enclosing scope) so that per-property type references - e.g. a generic
     // method's own type parameters - nest under it instead of becoming sibling scopes that
-    // TypeChecker2's location-based scope lookup can never find. See LuauExternTypeUseDefinitionScope.
+    // TypeChecker2's location-based scope lookup can never find. See LuwuExternTypeUseDefinitionScope.
     ScopePtr bodyScope = scope;
-    if (FFlag::LuauExternTypeUseDefinitionScope || FFlag::LuwuGenericNominals)
+    if (FFlag::LuwuExternTypeUseDefinitionScope || FFlag::LuwuGenericNominals)
     {
         if (ScopePtr* defnScopePtr = astExternTypeDefiningScopes.find(declaredExternType))
             bodyScope = *defnScopePtr;
@@ -3737,19 +3737,20 @@ Inference ConstraintGenerator::check(const ScopePtr& scope, AstExprGlobal* globa
         return Inference{*ty, refinementArena.proposition(key, builtinTypes->truthyType)};
     }
 
-    // A control flow join hands us a phi def that nothing has bound a type to, and `lookup` won't
-    // resolve one of those. For ordinary globals that never comes up: `prepopulateGlobalScope`
-    // walks every `AstExprGlobal` in the module up front and maps its def -- join phis included --
-    // onto whatever the global is bound to. A Luwu class is referenced as a global too, but its
-    // binding isn't created until the class prepass in visitBlockWithoutChildScope, which runs
-    // *after* that walk, so no such mapping exists and any reference downstream of an `if` that
-    // also mentions the class fell through to `errorType`. Globals carry no typestate, so the
-    // binding is the answer prepopulation would have given.
+    // A control-flow join produces a phi def that nothing has bound a type to, and `lookup` can't
+    // resolve a phi def. Ordinary globals never need this: `prepopulateGlobalScope` walks every
+    // `AstExprGlobal` in the module up front and maps its def, join phis included, to the global's
+    // binding.
+    // A Luwu class is also referenced as a global, but its binding is only created by the class
+    // prepass in visitBlockWithoutChildScope, which runs *after* that walk. So a class referenced
+    // after an `if` that also mentions it has no mapping and would get `errorType`. Globals carry no
+    // typestate, so the class's binding is exactly what prepopulation would have returned.
     //
-    // Only for a class. Any other global reaching here keeps `errorType`: a user-defined type function
-    // calling itself inside a loop (`for _, x in f(t) do`) reads its own name through a loop phi, and
-    // handing back its binding there gives it its own still-unsolved type, which blocks every call
-    // made with the result ("outstanding free or blocked type in function call").
+    // This applies only to classes; any other global that reaches here keeps `errorType`. For
+    // example, a user-defined type function that calls itself inside a loop (`for _, x in f(t) do`)
+    // reads its own name through a loop phi. Returning its binding there would give it its own
+    // still-unsolved type, which blocks every call made with the result ("outstanding free or
+    // blocked type in function call").
     if (FFlag::DebugLuauUserDefinedClasses && get<Phi>(def) && classGlobalNames.contains(global->name))
     {
         if (auto ty = scope->lookup(global->name))

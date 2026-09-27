@@ -965,12 +965,12 @@ const Instruction* executeFORGPREP(lua_State* L, const Instruction* pc, StkId ba
     return pc;
 }
 
-// Luwu Classes (rfcs/classes.md): LOP_NEWOBJECT for native code -- the non-FIELDS forms, and FIELDS-form
-// guard misses. This must not be a bare exit to the interpreter: an unconditional
-// `JUMP vmExit` carries no register liveness, so the analysis would let stores to registers the rest
-// of the bytecode still reads (a numeric for loop's limit/step/index, say) be eliminated, and the
-// interpreter would resume on top of garbage. Running it as an ordinary fallback keeps the register
-// state honest and lets native execution continue past the construction.
+// Luwu Classes (rfcs/classes.md): LOP_NEWOBJECT for native code. It handles the non-FIELDS forms, and
+// FIELDS-form guard misses. This must not be a bare exit to the interpreter. An unconditional
+// `JUMP vmExit` carries no register liveness, so the analysis would eliminate stores to registers the
+// rest of the bytecode still reads, such as a numeric for loop's limit, step or index. The interpreter
+// would then resume on top of garbage. Running construction as an ordinary fallback keeps the register
+// state honest, and native execution continues past the construction.
 //
 // Kept in step with VM_CASE(LOP_NEWOBJECT) in lvmexecute.cpp -- see there for the shape rules.
 const Instruction* executeNEWOBJECT(lua_State* L, const Instruction* pc, StkId base, TValue* k)

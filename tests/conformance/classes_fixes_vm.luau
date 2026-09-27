@@ -175,10 +175,10 @@ do
     assert(PrivatePrimary.makeViaPcall(7).x == 7)
 end
 
--- The ban holds whatever slot a call site has cached. A site's key is fixed, so the only way its slot
--- cache gets warm before an object reaches it is a table: reading `__init` off a table caches that
--- table's hash slot for the key, which can be any number, including an object's `__init` offset (the
--- class with no fields keeps `__init` at offset 0).
+-- The ban on reading `__init` holds whatever slot a call site has cached. A call site's key is a fixed
+-- constant, so the only way its slot cache can be warm before an object reaches it is through a table.
+-- Reading `__init` off a table caches that table's hash slot for the key. That slot can be any number,
+-- including an object's `__init` offset: `Empty` has no fields, so its `__init` is at offset 0.
 class Empty
 end
 

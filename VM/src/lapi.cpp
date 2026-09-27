@@ -1744,10 +1744,11 @@ void lua_newobject(lua_State* L, int idx)
 
     LuauClass* classdef = classvalue(cls);
 
-    // Construction runs here rather than through the class's `__call`, which skips the private
-    // constructor check (the embedder is trusted) and reads `__init` by offset rather than as a member
-    // (it is never readable by name). The object takes the class's stack slot, so it is anchored for
-    // construction and ends up exactly where the class was once the arguments are dropped.
+    // Construction runs here instead of through the class's `__call`. Doing it here skips the private
+    // constructor check, because the embedder is trusted. It also reads `__init` by offset rather than
+    // as a member, since `__init` is never readable by name. The object replaces the class in its stack
+    // slot. That anchors it during construction, and once the arguments are dropped it ends up exactly
+    // where the class was.
     ptrdiff_t objectslot = savestack(L, cls);
     LuauObject* object = luaR_newobject(L, classdef);
     setobjectvalue(L, cls, object);

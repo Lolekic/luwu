@@ -346,15 +346,22 @@ public:
 
     void reportError(TypeErrorData&& data, const Location& location);
     void reportError(TypeError e);
-    // Luwu Classes (rfcs/classes.md): instantiating a generic class substitutes into its members while
-    // a pending expansion inside one can still be unexpanded, and the substitution copies it with new
-    // arguments that nothing else queues: an optional self-reference (`sw: S<U, T>?`), or a table's
-    // display arguments (`r: R<A<T>>` inside `class A<T>`, where `type R<T> = { R<T> }` never uses
-    // `T`). This queues their expansion. A member that is itself pending is deferred separately.
+    // Luwu Classes (rfcs/classes.md): queues expansion of the pending aliases inside a generic class's
+    // member that instantiating the class copied and that nothing else will expand.
+    //
+    // Instantiating a generic class substitutes the type arguments into each member. A member can
+    // still contain a pending (unexpanded) alias at that point. The substitution copies that alias with
+    // the new arguments, and nothing else queues an expansion for the copy. Two shapes hit this:
+    //  - an optional reference to the class itself (`sw: S<U, T>?`);
+    //  - the type arguments a table records for display (`instantiatedTypeParams`), e.g. `r: R<A<T>>`
+    //    inside `class A<T>`, where `type R<T> = { R<T> }` never uses `T`.
+    // A member that is itself a pending expansion is not handled here; the caller defers it.
     void queuePendingMemberExpansions(TypeId memberTy, NotNull<const Constraint> constraint);
+    // Luwu Classes (rfcs/classes.md): a generic class's method as read through the class value. Nothing
+    // instantiates the class's generics there, so the method is made generic over them itself.
+    TypeId quantifyOverClassGenerics(TypeId methodTy, const GeneralizationConstraint& c);
     // Luwu Classes (rfcs/classes.md): reports a generic class's infinite reference to itself once, at
     // the reference inside the class.
-    TypeId quantifyOverClassGenerics(TypeId methodTy, const GeneralizationConstraint& c);
     void reportInfiniteSelfReference(TypeId reference, TypeId classTemplate, const Location& expansionLocation);
 
     /**

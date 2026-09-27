@@ -75,7 +75,7 @@ LUAU_FASTFLAG(DebugLuauUserDefinedClassesRuntime)
 LUAU_FASTFLAG(LuwuBetterUserDefinedClasses)
 LUAU_FASTFLAG(DebugLuwuCompilerTrustsTypeAnnotations)
 LUAU_FASTFLAG(LuauExportValueSyntax)
-LUAU_FASTFLAG(LuauExportedClassIsNilWorkaround)
+LUAU_FASTFLAG(LuwuExportedClassIsNilWorkaround)
 LUAU_FASTFLAG(LuauAutoStack)
 LUAU_FASTFLAG(LuwuTableDrop)
 LUAU_FASTFLAG(LuauUdataMetatablePinned)
@@ -1522,8 +1522,8 @@ int pluginReadMember(lua_State* L)
     return 1;
 }
 
-// The same read, performed on a freshly created thread so that no Lua frame is on the stack at the
-// moment of the access: the shape that otherwise looks exactly like the embedder calling in.
+// The same read, done on a freshly created thread so that no Lua frame is on the stack when the access
+// happens. Apart from being called from Luwu code, this looks exactly like the embedder calling in.
 int pluginReadMemberOnNewThread(lua_State* L)
 {
     luaL_checkany(L, 1);
@@ -4648,7 +4648,7 @@ TEST_CASE("ClassesExportHoistingRepro")
         {FFlag::LuwuGenericNominals, true},
         {FFlag::LuauExportValueSyntax, true},
         {FFlag::LuwuDefaultArguments, true},
-        {FFlag::LuauExportedClassIsNilWorkaround, true},
+        {FFlag::LuwuExportedClassIsNilWorkaround, true},
     };
 
     runConformance("classes_export_hoisting.luau");
@@ -4799,9 +4799,9 @@ TEST_CASE("ClassesFixesNativeCodegen")
     runClassesFixesConformance("classes_fixes_ncg.luau");
 }
 
-// Luwu Classes (rfcs/classes.md): the C API for classes, called the way an embedder calls it -- from C,
-// with no Lua frame anywhere on the stack. That is the case the language rules single out: native code
-// bypasses `private`, but is still held to `const` and to the block on reading `__init`.
+// Luwu Classes (rfcs/classes.md): the C API for classes, called the way an embedder calls it: from C, with no
+// Lua frame anywhere on the stack. The language rules treat this case specially. Native code bypasses
+// `private`, but it is still held to `const` and to the ban on reading `__init`.
 namespace
 {
 
@@ -5503,15 +5503,23 @@ Yielder_ = Yielder
     }
 }
 
-// Luwu Classes (rfcs/classes.md): differential and crash fuzzing of classes. tests/classes_fuzz/run.luau generates random
-// class programs and runs each through the luau CLI at every optimization level, interpreted and natively compiled,
-// comparing results against -O0 and reporting any crash, assert or divergence. It is a seal script and needs seal 0.8.x
-// at >= 0.8.1 (ChildProcess:status arrived in 0.8.1; 0.9.0 breaks the std APIs it uses): found on PATH (seal.exe on
-// Windows), or at LUWU_SEAL. Without it the case fails; set LUWU_SKIP_CLASSES_FUZZ=1 to skip it on purpose.
-// LUWU_CLASSES_FUZZ_COUNT and LUWU_CLASSES_FUZZ_START pick the seeds (default 300 programs from 1).
-// The fuzzer covers every -O level and codegen mode itself, so it runs once per binary configuration that doesn't
-// set -O or --codegen, instead of again under each of those. Run from an assert-enabled build: it uses the luau CLI
-// built alongside this binary.
+// Luwu Classes (rfcs/classes.md): differential and crash fuzzing of classes.
+//
+// tests/classes_fuzz/run.luau generates random class programs. It runs each one through the luau CLI at every
+// optimization level, both interpreted and natively compiled, compares the results against -O0, and reports any
+// crash, assert or divergence.
+//
+// run.luau is a seal script. It needs seal 0.8.x at 0.8.1 or later: ChildProcess:status arrived in 0.8.1, and
+// 0.9.0 breaks the std APIs it uses. seal is looked up on PATH (seal.exe on Windows), or at LUWU_SEAL. Without
+// seal this case fails. Set LUWU_SKIP_CLASSES_FUZZ=1 to skip it on purpose.
+//
+// LUWU_CLASSES_FUZZ_COUNT and LUWU_CLASSES_FUZZ_START pick the seeds. The default is 300 programs, starting
+// at seed 1.
+//
+// The fuzzer covers every -O level and codegen mode itself. So this case runs only in the configuration that
+// sets neither -O nor --codegen, not again under each of them.
+//
+// Run it from an assert-enabled build: it uses the luau CLI built alongside this binary.
 TEST_CASE("ClassesFuzz")
 {
     const char* skipEnv = std::getenv("LUWU_SKIP_CLASSES_FUZZ");
@@ -5696,7 +5704,7 @@ TEST_CASE("ExportedClasses")
         {FFlag::LuwuBetterUserDefinedClasses, true},
         {FFlag::DebugLuauUserDefinedClassesRuntime, true},
         {FFlag::LuauExportValueSyntax, true},
-        {FFlag::LuauExportedClassIsNilWorkaround, true},
+        {FFlag::LuwuExportedClassIsNilWorkaround, true},
     };
 
     runConformance("exportclasses.luau");

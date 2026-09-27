@@ -1483,14 +1483,17 @@ bool ConstraintSolver::tryDispatch(const TypeAliasExpansionConstraint& c, NotNul
         return true;
     }
 
-    // A generic class can be reached here before its own body has been solved: a reference to the
-    // class from inside itself always is, and so is a forward reference to a class declared later
-    // in the file. Its members are still BlockedTypes then, and instantiating shares them rather
-    // than substituting them, so `Box<number>:get()` would come back returning `T`. Wait for the
-    // members instead. There is no cycle in this: the class's own annotations become
-    // PendingExpansionTypes at constraint-generation time, so a member can be solved without this
-    // expansion having run. If we are being force-dispatched there is nothing left to wait for, and
-    // the substitution below defers each still-blocked member individually.
+    // A generic class can reach this point before its own body is solved. This always happens for a
+    // reference to the class from inside itself, and for a forward reference to a class declared
+    // later in the file. The class's members are then still BlockedTypes. Instantiating would share
+    // them instead of substituting into them, so `Box<number>:get()` would return `T`. So wait for
+    // the members first.
+    //
+    // Waiting cannot deadlock. The class's own annotations became PendingExpansionTypes during
+    // constraint generation, so its members can be solved without this expansion running first.
+    //
+    // On a forced dispatch there is nothing left to wait for. The substitution below then defers each
+    // member that is still blocked (see InstantiateNominalPropConstraint).
     if (FFlag::LuwuGenericNominals && !force)
     {
         if (const ExternType* templateEtv = get<ExternType>(follow(tf->type)))
@@ -4444,10 +4447,12 @@ void ConstraintSolver::queuePendingMemberExpansions(TypeId memberTy, NotNull<con
 
 void ConstraintSolver::reportInfiniteSelfReference(TypeId reference, TypeId classTemplate, const Location& expansionLocation)
 {
-    // The reference is written inside the class, and the expansion constraint generated for it
-    // carries that location (it is still unsolved: the reference is unexpanded). The expansion that
-    // found it can be any use of the class, and a use can also queue another expansion of the same
-    // reference from wherever it instantiates the class.
+    // Report the error at the reference written inside the class, not at `expansionLocation`: the
+    // expansion that found the problem can come from any use of the class. The reference's own
+    // TypeAliasExpansionConstraint is still unsolved (the reference hasn't been expanded) and carries
+    // the reference's location, so look for it. A use of the class can also queue another expansion
+    // of the same reference at the use's location. That is why the constraint must also lie inside
+    // the class declaration. If none is found, fall back to `expansionLocation`.
     Location location = expansionLocation;
     if (const ExternType* templateEtv = get<ExternType>(classTemplate))
     {

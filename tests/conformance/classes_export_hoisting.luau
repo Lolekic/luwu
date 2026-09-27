@@ -1,12 +1,13 @@
 --!nocheck
 
--- Regression test: an `export class` referenced later in the same module (including through
--- constructing another class from it) previously risked seeing the exported class as nil due to
--- export hoisting ordering. `export` statements force the module's implicit return to be the
--- (frozen) export table, which conflicts with an explicit top-level `return`. So (as in
--- exportclasses.luau) the exported class under test lives in its own chunk, loaded and run via
--- loadstring, while this outer chunk stays export-free and can `return 'OK'`. Since the inner
--- chunk can't `return` its result either, it stashes the result in a global instead.
+-- Regression test: an `export class` referenced later in the same module, including by constructing
+-- another class from it, could see the exported class as nil because of the order exports are hoisted in.
+--
+-- How the test is set up: `export` statements make the module's implicit return the (frozen) export
+-- table, which conflicts with an explicit top-level `return`. So, as in exportclasses.luau, the exported
+-- class under test lives in its own chunk, loaded and run with loadstring. This outer chunk has no
+-- exports, so it can `return 'OK'`. The inner chunk can't `return` its result either, so it stores the
+-- result in a global.
 local source = [[
     export class ReproCat
         name: string

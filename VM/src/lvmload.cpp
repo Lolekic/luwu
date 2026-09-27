@@ -278,8 +278,9 @@ static void remapUserdataTypes(char* data, size_t size, uint8_t* userdataRemappi
     );
 }
 
-// Luwu (bytecode versioning): what a blob's header says it contains. The loader asks these, never a raw version number, so that a
-// version number doesn't imply every feature below it and legacy and Luwu bytecode can each decide their own.
+// Luwu (bytecode versioning): what a blob's header says it contains. The loader checks these, never a raw
+// version number. A version number must not imply every feature below it, and legacy and Luwu bytecode each
+// decide their own features.
 struct BytecodeFeatures
 {
     // Upstream-numbered Luau bytecode (LBC_VERSION_MIN..LBC_VERSION_MAX), rather than Luwu bytecode
@@ -328,7 +329,8 @@ static const char* getUpstreamVersionContents(uint8_t version)
     }
 }
 
-// Luwu (bytecode versioning): the first opcode or builtin id in legacy code that legacy bytecode can't contain, if any
+// Luwu (bytecode versioning): for a proto loaded as legacy bytecode, the first opcode or builtin id in its
+// code that legacy bytecode never contained, if any
 struct LegacyCodeViolation
 {
     const char* what;
@@ -355,7 +357,8 @@ static LegacyCodeViolation findNonLegacyCode(const Proto* p)
     return {nullptr, 0};
 }
 
-// Luwu (bytecode versioning): the first type tag in legacy type info that legacy bytecode can't contain, or -1
+// Luwu (bytecode versioning): for a proto loaded as legacy bytecode, the first type tag in its type info that
+// legacy bytecode never contained, or -1
 static int findNonLegacyTypeTag(Proto* p)
 {
     int found = -1;

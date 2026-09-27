@@ -866,7 +866,7 @@ end
 
 TEST_CASE_FIXTURE(ClassesFixture, "userdata_is_namable_and_narrows_via_typeof")
 {
-    // `userdata` is now a writable type annotation (like `object`/`class`), and `typeof(x) == "..."`
+    // `userdata` is a writable type annotation (like `object`/`class`), and `typeof(x) == "..."`
     // narrows it to the matching extern datatype (a direct child of the userdata root).
     CheckResult result = check(R"(
 local function f(x: userdata)
@@ -1991,12 +1991,13 @@ TEST_CASE_FIXTURE(ClassesFixture, "class_referenced_after_a_branch_that_also_ref
         {FFlag::LuwuBetterUserDefinedClasses, true},
     };
 
-    // A class is referenced as a global, and the join at the end of the `if` produces a phi def
-    // that nothing binds a type to: `prepopulateGlobalScope` maps every global reference's def
-    // onto its binding up front, but it runs before the class prepass creates that binding. Every
-    // reference to the class downstream of the branch used to silently come back as *error-type*,
-    // which swallowed real errors rather than producing new ones -- hence the deliberately wrong
-    // annotations, which are what the bug made disappear.
+    // Regression test. A class is referenced as a global, and the join at the end of the `if` produces a
+    // phi def that nothing binds a type to. `prepopulateGlobalScope` maps every global reference's def onto
+    // its binding up front, but it runs before the class prepass creates the class's binding. So every
+    // reference to the class after the branch silently came back as *error-type*.
+    //
+    // *error-type* swallows real errors instead of reporting new ones. That is why the annotations here
+    // are deliberately wrong: they are the errors the bug made disappear.
     auto result = check(R"(
 class Prefix(prefix: string)
     function is_dot(self)
@@ -2030,10 +2031,11 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "type_function_calling_itself_in_a_loop_with_
         {FFlag::LuwuBetterUserDefinedClasses, true},
     };
 
-    // The class fallback above resolves a global read through a phi def by its binding. A type
-    // function calling itself in a loop reads its own name through the loop's phi, and handing back
-    // its binding gave it its own unsolved type: every call made with the result failed with
-    // "outstanding free or blocked type in function call", and definition files using the pattern
+    // Regression test for the class fallback exercised by the test above, which resolves a global read
+    // through a phi def to the global's binding. A type function that calls itself in a loop reads its own
+    // name through the loop's phi. The fallback handed back the type function's binding, so the call saw
+    // the function's own, still unsolved type. Every call made with the result then failed with
+    // "outstanding free or blocked type in function call". Definition files using this pattern
     // (PhoenixEngine's `phoenix.d.luau`) failed to load in luwu-lsp, which always enables classes.
     auto result = check(R"(
 type function flatten(un: type): { type }
@@ -2055,13 +2057,14 @@ TEST_CASE_FIXTURE(ClassesFixture, "constructor_argument_that_is_itself_a_constru
         {FFlag::LuwuBetterUserDefinedClasses, true},
     };
 
-    // Construction dispatches through the class's `__call` metamethod, and a final argument that
-    // is itself a call contributes a type *pack*, which skips the per-argument check in
-    // TypeChecker2 and leaves overload resolution as the only thing looking at it. Its report was
-    // indexed one slot short of the pack the resolver actually tested (which carries the forwarded
-    // callee at the front), so for a one-argument constructor it resolved against nothing at all
-    // and the mismatch went unreported. Every other spelling of the same wrong argument -- a
-    // literal, a local, a parenthesized call -- was caught, which is what made this so quiet.
+    // Construction dispatches through the class's `__call` metamethod. A final argument that is itself a
+    // call contributes a type *pack*. A pack skips the per-argument check in TypeChecker2, so overload
+    // resolution is the only thing that checks it.
+    //
+    // Regression test: the pack the resolver tests has the forwarded callee at the front, but its report
+    // was indexed one slot short of that pack. For a one-argument constructor the report resolved against
+    // nothing, and the mismatch went unreported. Every other spelling of the same wrong argument (a
+    // literal, a local, a parenthesized call) was caught, which is why the bug stayed hidden.
     auto result = check(R"(
 class Comp(x: string) end
 class Other(y: string) end

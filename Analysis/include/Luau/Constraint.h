@@ -326,14 +326,18 @@ struct TypeInstantiationConstraint
     std::vector<TypePackId> typePackArguments;
 };
 
-// LuwuGenericNominals: a generic class can be instantiated (`Box<number>`) before its own members
-// have been solved. A reference to the class from inside its own body always is, and so is a
-// forward reference to a class declared later in the file. A member's type is still a BlockedType
-// at that point, and copying it into the instantiation shares it, so binding it later hands the
-// instantiation the *uninstantiated* member -- `Box<number>:get()` would return `T`. Expansion
-// waits for such members; if it is force-dispatched first, the instantiation gets a fresh
-// BlockedType for each one instead, and this constraint fills that in with the substituted member
-// once the template's own member is known.
+// Luwu (GenericNominals): fills in one member of a generic class instantiation (`Box<number>`) whose type
+// was not known yet when the instantiation was made.
+//
+// A generic class can be instantiated before its own members are solved. This always happens for a
+// reference to the class from inside its own body, and for a forward reference to a class declared
+// later in the file. At that point each member's type is still a BlockedType. Copying that BlockedType
+// into the instantiation would share it with the template. When it was bound later, the instantiation
+// would see the uninstantiated member, and `Box<number>:get()` would return `T`.
+//
+// Normally the expansion waits for these members. If it is force-dispatched first, the instantiation
+// gets a fresh BlockedType for each blocked member instead. This constraint binds that BlockedType to
+// the substituted member once the template's member is known (or to the error type, if it never is).
 struct InstantiateNominalPropConstraint
 {
     // The member's type on the template class, blocked until the class body is solved.

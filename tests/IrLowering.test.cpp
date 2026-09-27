@@ -3505,9 +3505,10 @@ TEST_CASE_FIXTURE(LoweringFixture, "ArgumentTypeRefinement")
     ensureVectorFloat();
     ensureVectorSize3();
 
-    // Luwu: `x` is known to be a vector within the block that writes it, which is all the IR needs. The
-    // parameter's own type stays unknown: its incoming value is (see updateLocalTypeCandidates in
-    // BytecodeAnalysis.cpp). Upstream records `; R0: vector [argument]`, which every block assumes on entry.
+    // Luwu: `x` is known to be a vector only inside the block that writes it, and that is all the IR needs.
+    // The parameter's own type stays unknown, because the value it arrives with is unknown (see
+    // updateLocalTypeCandidates in BytecodeAnalysis.cpp). Upstream records `; R0: vector [argument]`, which
+    // every block then assumes on entry.
     CHECK_EQ(
         "\n" + getCodegenAssembly(
                    R"(
@@ -8687,10 +8688,11 @@ TEST_CASE_FIXTURE(LoweringFixture, "ClassObjectMemberReadResetsRegisterType")
     ScopedFastFlag classesRuntime{FFlag::DebugLuauUserDefinedClassesRuntime, true};
     ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
 
-    // GETOBJECTMEMBER R2 (self.nxt) reuses the register MULK just wrote a number into. The read's result
-    // type is unknown, so `.x` on it takes the untyped layout: the table guard misses to the object path
-    // (bb_fallback_8), a different block from the slot check's generic fallback (bb_fallback_7). A stale
-    // `number` hint would send both to the generic fallback, so an object never took a native path.
+    // GETOBJECTMEMBER R2 (self.nxt) reuses the register that MULK just wrote a number into. The read's
+    // result type is unknown, so `.x` on it uses the untyped layout. The table guard misses to the object
+    // path (bb_fallback_8), which is a different block from the slot check's generic fallback
+    // (bb_fallback_7). If the register kept MULK's stale `number` type, both the table guard and the slot
+    // check would miss to the generic fallback, and an object would never take a native path.
     CHECK_EQ(
         "\n" + getCodegenAssembly(
                    R"(
@@ -9006,11 +9008,16 @@ TEST_CASE("ClassFallbacksSpillLiveValuesA64")
     }
 }
 
-// Luwu Classes (rfcs/classes.md): the class lowerings that branch forward to a label inside their own code
-// (a check that rejoins the main line) must reserve every scratch register before that branch. A register
-// evicted after it is stored to its spill slot only on the path that didn't jump, and the rejoined code
-// reloads it from that slot on both. Twenty live integers exhaust the allocator, so any late reservation
-// shows up as a store to a stack slot between such a branch and its label.
+// Luwu Classes (rfcs/classes.md): some class lowerings contain a check that branches forward to a label inside
+// their own code and rejoins the main line there. Such a lowering must reserve all of its scratch registers
+// before that branch.
+//
+// The reason: if a register is evicted after the branch, it is stored to its spill slot only on the path that
+// did not jump. The code after the label reloads it from that slot on both paths, so the path that jumped
+// reads a slot nothing wrote.
+//
+// This test keeps twenty integers live, which exhausts the allocator. Any reservation made after the branch
+// then shows up as a store to a stack slot between the branch and its label.
 static std::string lowerClassInstUnderPressure(Luau::CodeGen::AssemblyOptions::Target target, Luau::CodeGen::IrCmd cmd)
 {
     using namespace Luau::CodeGen;

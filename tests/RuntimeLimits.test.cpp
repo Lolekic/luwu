@@ -499,6 +499,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "test_generic_pruning_recursion_limit")
     CHECK_EQ("<a>({ read Do: { read Re: { read Mi: a } } }) -> ()", toString(requireType("get")));
 }
 
+// deviaze: nominal roots 1 -> 4 somehow gets this to fail only on Windows CI.
 // Luwu: skipped under MSVC. With --fflags=true the Windows Debug build exhausts the unification budget first
 // (UnificationTooComplex, no NormalizationTooComplex). Which budget runs out first depends on the order the solver
 // visits types, and Luwu's four nominal roots (userdata, class, object, vector; upstream has one) change that order.

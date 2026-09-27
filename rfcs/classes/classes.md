@@ -171,6 +171,24 @@ Specifically:
 - The contextual keywords `extends` and `implements` *may not* be fields or function names.
 - The class body ends with the `end` keyword.
 
+#### Grammar
+
+```ebnf
+classStatement ::= ['export'] 'class' NAME ['<' GenericTypeListWithDefaults '>'] [primaryCtor] {classMember} 'end'
+primaryCtor    ::= [access] '(' [ctorParam {',' ctorParam}] ')'
+ctorParam      ::= [access] ['const'] NAME [':' Type] ['=' exp]
+classMember    ::= [access] ['const'] NAME [':' Type] ['=' exp] [';']
+                 | {attribute} [access] {attribute} 'function' NAME funcbody [';']
+access         ::= 'public' | 'private'
+```
+
+`class`, `public`, `private` and `const` are contextual keywords here. A few rules the grammar doesn't show:
+
+- `const` comes after the access specifier (`private const x`, not `const private x`).
+- A method's attributes are written on one side of its access specifier, not both.
+- A primary constructor has no trailing comma and no `...` parameter.
+- A method never takes `const`: functions in a class are always const.
+
 Class definitions are a block construct like `for` loops, and do not evaluate to a value.
 
 Defining two classes with the same name in the same module is forbidden and raises a syntax error.

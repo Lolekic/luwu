@@ -564,12 +564,12 @@ struct ClassUserData
     virtual ~ClassUserData() {}
 };
 
-// Attached to a user-defined class's instance ExternType (see FFlag::DebugLuauUserDefinedClasses)
-// so consumers can tell which of its `props` are actual fields, as opposed to methods -- both
-// fields and non-metamethod instance methods live in the same `props` map, and Property alone
-// can't distinguish them: a method's `readTy` doesn't resolve to a FunctionType until constraint
-// solving finishes, which may be after a consumer (e.g. the `class.fields` magic function in
-// BuiltinDefinitions.cpp) needs to know. Populated by ConstraintGenerator's class handling.
+// Attached to a user-defined class's instance ExternType (see FFlag::DebugLuauUserDefinedClasses).
+// It lists which of the type's `props` are fields rather than methods.
+// Fields and non-metamethod instance methods share the same `props` map, and a Property alone can't
+// tell them apart: a method's `readTy` only resolves to a FunctionType once constraint solving
+// finishes. A consumer may need to know earlier, e.g. the `class.fields` magic function in
+// BuiltinDefinitions.cpp. Populated by ConstraintGenerator's class handling.
 struct ClassFieldUserData final : ClassUserData
 {
     std::set<Name> fieldNames;
@@ -610,9 +610,8 @@ struct ExternType
     //
     // Derived from `parent` at construction (a child inherits its parent's
     // root; a parentless type is its own root), so it can't drift. This is the
-    // single source of truth for "which hierarchy is this / is this a root";
-    // upstream has no `root` and derives the answer from `parent`/`relation`
-    // at each use.
+    // single source of truth for "which hierarchy is this / is this a root",
+    // replacing the ~20 ad-hoc `parent`/`relation` derivations upstream had.
     std::optional<TypeId> root;
 
     std::optional<TypeId> metatable; // metaclass?

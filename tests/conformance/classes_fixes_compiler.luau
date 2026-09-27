@@ -11,10 +11,12 @@ local function expectfail(s, expected, f, ...)
     return err
 end
 
--- A class used before its declaration statement ran reads a nil binding (classes hoist). Every construction
--- form must raise what calling nil raises, after evaluating the arguments and before any default, and a
--- `class.isinstance` against it must raise the builtin's error instead of testing against nil. The results
--- are bound to locals: `return Cls()` would compile to a plain call and never reach NEWOBJECT.
+-- A class used before its declaration statement has run reads a nil binding (classes hoist).
+-- - Every construction form must raise the same error as calling nil. It raises after the arguments are
+--   evaluated and before any default is.
+-- - `class.isinstance` against the nil binding must raise the builtin's error, not test against nil.
+-- The results are bound to locals, because `return Cls()` would compile to a plain call and never reach
+-- NEWOBJECT.
 local earlyArgs = 0
 local earlyDefaults = 0
 

@@ -1070,7 +1070,7 @@ TEST_CASE_FIXTURE(Fixture, "fuzzer_self_referential_class_definition")
         end
     )");
 
-    // The input is a fuzzer repro and is kept verbatim; `typeof(l0)` now suggests `class<l0>`.
+    // The input is a fuzzer repro and is kept verbatim; `typeof(l0)` suggests `class<l0>`.
     LUAU_REQUIRE_ERROR_COUNT(1, result);
     auto err = get<GenericError>(result.errors[0]);
     REQUIRE(err);
@@ -1123,7 +1123,7 @@ end
 )"
     );
 
-    // The input is a fuzzer repro and is kept verbatim; `typeof(Animal)` now suggests `class<Animal>`.
+    // The input is a fuzzer repro and is kept verbatim; `typeof(Animal)` suggests `class<Animal>`.
     LUAU_REQUIRE_ERROR_COUNT(2, result);
     auto err = get<SyntaxError>(result.errors[0]);
     REQUIRE(err);

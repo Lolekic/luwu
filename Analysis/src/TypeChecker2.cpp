@@ -2055,12 +2055,13 @@ void TypeChecker2::visitCall(AstExprCall* call)
         {
             if (const SubtypingReasonings* sr = get_if<SubtypingReasonings>(&reasons))
             {
-                // `OverloadResolver::testFunctionOrCallMetamethod` forwards the callee as the
-                // `__call` metamethod's first argument, so every path in `reasons` is indexed
-                // against a pack one longer than the one we built out of `call->args`. Rebuild
-                // that pack (and the matching expression list) here, or argument N's reasoning
-                // resolves against argument N - 1 -- and for a one-argument call, such as a class
-                // constructor, against nothing at all, which `maybeEmplaceError` silently drops.
+                // When the overload is a `__call` metamethod,
+                // `OverloadResolver::testFunctionOrCallMetamethod` passes the callee as its first
+                // argument. Every path in `reasons` then indexes into a pack one entry longer than
+                // the one built from `call->args`, so rebuild that longer pack and the matching
+                // expression list here. Otherwise argument N's reasoning would be matched against
+                // argument N - 1. For a one-argument call, such as a class constructor, it would be
+                // matched against nothing, and `maybeEmplaceError` would silently drop it.
                 TypePackId reportedArgsPack = argsPack;
                 std::vector<AstExpr*> reportedArgExprs = argExprs;
                 if (result2.metamethods.contains(ty))

@@ -5,12 +5,12 @@
 -- its protos stay interpreted even under --codegen, so it cannot catch a lowering bug in them. Don't add
 -- `@native` here.
 --
--- LOP_NEWCLASSMEMBER and non-native LOP_NEWOBJECT forms run through a C fallback. They used to be
--- unconditional exits to the interpreter instead, which carried no register liveness information: stores
--- to registers the rest of the bytecode still reads -- a numeric for loop's limit/step/index,
--- established before the loop body and never touched by construction -- were eliminated as dead, and the
--- interpreter resumed on top of garbage. That showed up as an endless loop, a bogus loop variable, or an
--- assertion failure in FORNLOOP.
+-- LOP_NEWCLASSMEMBER and the non-native LOP_NEWOBJECT forms run through a C fallback. These tests guard
+-- against the bug from when they were unconditional exits to the interpreter instead. Those exits carried
+-- no register liveness information, so stores to registers that the rest of the bytecode still reads were
+-- eliminated as dead. One example is a numeric for loop's limit, step and index: they are set before the
+-- loop body, and construction never touches them. The interpreter then resumed on top of garbage, which
+-- showed up as an endless loop, a bogus loop variable, or an assertion failure in FORNLOOP.
 
 local function expectpass(s, f)
     f()
@@ -119,13 +119,16 @@ expectpass("declaring a class with methods leaves the surrounding locals intact"
     assert(Declared{ v = 41 }:bump() == 42)
 end)
 
--- LOP_NEWOBJECT is emitted for a class with a private constructor too, which means the opcode -- not
--- luaR_createobject's C frame -- is what enforces "a private constructor is only callable from inside
--- its own class". The authority is the executing closure's Proto::ownerclass. NEWOBJECT is only emitted
--- for a direct, statically resolved `ClassName(...)` callee whose single result is used, so every
--- construction here is bound to a local first: `return Acct(...)` is a multret call and would test
--- luaR_createobject instead. pcall-laundered and aliased calls still go through luaR_createobject;
--- both must stay denied either way.
+-- LOP_NEWOBJECT is emitted for a class with a private constructor too. So the opcode, not
+-- luaR_createobject's C frame, enforces "a private constructor is only callable from inside its own
+-- class". It checks the executing closure's Proto::ownerclass.
+--
+-- NEWOBJECT is emitted only for a direct, statically resolved `ClassName(...)` callee whose single result
+-- is used. So every construction here is bound to a local first. `return Acct(...)` is a multret call and
+-- would test luaR_createobject instead.
+--
+-- A call laundered through pcall, or made through an alias, still goes through luaR_createobject. Those
+-- must be denied too.
 class Acct private (public owner: string, balance: number)
     private balance
 

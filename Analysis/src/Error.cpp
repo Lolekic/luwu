@@ -197,14 +197,16 @@ struct ErrorConverter
             return preamble + "\n\t" + wanted + "\nbut got\n\t" + given;
         };
 
-        // Two types that stringify identically need something appended to tell them apart, but only
-        // something that actually differs: qualifying both sides with the same module produced the
-        // long-standing "Expected this to be 'X' from 'a.luau', but got 'X' from 'a.luau'". Try each
-        // distinguishing fact in turn and, if none of them separates the two, say nothing extra
-        // rather than repeating the same qualifier twice.
-        // A class value against one of its own objects: re-spell the class side as `class<X>`. The
-        // strings can differ too, since an object of a generic class prints its type arguments
-        // (`Box<number>`) and the class value doesn't.
+        // Two types that stringify identically need something appended to tell them apart. Only
+        // append a fact that actually differs between them: try each distinguishing fact in turn,
+        // and if none separates the two, append nothing rather than the same qualifier on both sides.
+        // Luwu: upstream appends the defining module whenever the names match, even when both types
+        // come from the same module, which reads "Expected this to be 'X' from 'a.luau', but got 'X'
+        // from 'a.luau'".
+        //
+        // First case: a class value against one of its own objects. Spell the class side as
+        // `class<X>`. This applies even when the two strings differ, because an object of a generic
+        // class prints its type arguments (`Box<number>`) and the class value doesn't.
         if (isClassValueAgainstItsObject(tm.givenType, tm.wantedType))
         {
             std::optional<std::string> givenDisplay = nominalDisplayName(tm.givenType);

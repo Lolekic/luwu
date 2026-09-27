@@ -801,8 +801,8 @@ reentry:
                     else if (LUAU_UNLIKELY(FFlag::DebugLuauUserDefinedClassesRuntime && ttisobject(rb)))
                     {
                         // fast-path: the "hash line" is an offset that points to the instance field
-                        // with the same name (only instance members, offset < numberofinstancemembers,
-                        // are ever valid SETTABLEKS targets -- static/method members are read-only here)
+                        // with the same name. Only instance members (offset < numberofinstancemembers)
+                        // are valid SETTABLEKS targets; static members and methods are read-only here.
                         uint8_t slot = LUAU_INSN_C(insn);
                         LuauObject* inst = objectvalue(rb);
                         if (LUAU_LIKELY(slot < inst->lclass->numberofinstancemembers && tsvalue(kv) == inst->lclass->offsettomember[slot]))
@@ -3852,9 +3852,10 @@ reentry:
                 // embedder's contract to keep.
                 //
                 // The FIELDS form initializes every member itself, so it is also the shape used for a
-                // class whose `__init` came from a primary constructor -- that `__init` does nothing
-                // but assign fields from its parameters, which the construction site has already done.
-                // Any other custom `__init` has to actually run, hence the hascustominit agreement.
+                // class whose `__init` came from a primary constructor. That `__init` does nothing but
+                // assign fields from its parameters, which the construction site has already done. Any
+                // other custom `__init` has to actually run, which is why the asserts below require the
+                // form to agree with `hascustominit`.
                 bool fieldsform = form == LBC_NEWOBJECT_FIELDS;
                 LUAU_ASSERT(ttisclass(classReg));
                 LUAU_ASSERT(

@@ -2752,8 +2752,8 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "attach_types_to_a_function_whose_generics_ar
     ScopedFastFlag newSolver{FFlag::DebugLuauForceOldSolver, false};
 
     // Luwu: taken from upstream 0.736 (after our last sync at 0.731). Generalization can leave a
-    // function's generic list holding a bound type, and reading it without `follow` asserted, or read a
-    // bound type as a generic and crashed in release builds.
+    // function's generic list holding a bound type. Reading that list without `follow` failed an assert,
+    // and in release builds it read the bound type as a generic and crashed.
     std::string code = R"(--!strict
         local Account = {}
         Account.__index = Account

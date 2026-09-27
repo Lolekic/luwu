@@ -21,7 +21,7 @@ using std::nullopt;
 LUAU_FASTFLAG(DebugLuauForceOldSolver)
 LUAU_FASTFLAG(LuauDropUnionSubtypeReasoning)
 LUAU_FASTFLAG(LuwuExternTypeGenericMethods)
-LUAU_FASTFLAG(LuauExternTypeUseDefinitionScope)
+LUAU_FASTFLAG(LuwuExternTypeUseDefinitionScope)
 LUAU_FASTFLAG(LuwuGenericNominals)
 LUAU_FASTFLAG(LuauHigherOrderGenericInference)
 LUAU_FASTFLAG(LuauSolverV2)
@@ -1252,13 +1252,13 @@ TEST_CASE_FIXTURE(Fixture, "extern_type_generic_method_property_syntax_resolves_
     // Regression test: type references inside an extern type's body (here, a generic
     // method's own type parameter, declared using the pre-existing colon-property syntax)
     // must resolve against the extern type's own definition scope. Before
-    // LuauExternTypeUseDefinitionScope, the per-method generic scope was created as a
+    // LuwuExternTypeUseDefinitionScope, the per-method generic scope was created as a
     // sibling of the (unused) extern type definition scope rather than a child of it, so
     // TypeChecker2's location-based scope lookup could never find it, and `T` was reported
     // as an unresolved global.
     ScopedFastFlag sffs[] = {
         {FFlag::DebugLuauForceOldSolver, false},
-        {FFlag::LuauExternTypeUseDefinitionScope, true},
+        {FFlag::LuwuExternTypeUseDefinitionScope, true},
     };
 
     loadDefinition(R"(
@@ -1282,7 +1282,7 @@ TEST_CASE_FIXTURE(Fixture, "extern_type_generic_method_property_syntax_still_bro
     // (not the code that uses Cat), so loading the definition file is where this fails.
     ScopedFastFlag sffs[] = {
         {FFlag::DebugLuauForceOldSolver, false},
-        {FFlag::LuauExternTypeUseDefinitionScope, false},
+        {FFlag::LuwuExternTypeUseDefinitionScope, false},
         {FFlag::LuwuGenericNominals, false},
     };
 
@@ -1308,7 +1308,7 @@ TEST_CASE_FIXTURE(Fixture, "extern_type_function_sugar_generic_method_resolves")
 {
     ScopedFastFlag sffs[] = {
         {FFlag::DebugLuauForceOldSolver, false},
-        {FFlag::LuauExternTypeUseDefinitionScope, true},
+        {FFlag::LuwuExternTypeUseDefinitionScope, true},
         {FFlag::LuwuExternTypeGenericMethods, true},
     };
 
@@ -1331,7 +1331,7 @@ TEST_CASE_FIXTURE(Fixture, "extern_type_generic_method_multiple_params")
 {
     ScopedFastFlag sffs[] = {
         {FFlag::DebugLuauForceOldSolver, false},
-        {FFlag::LuauExternTypeUseDefinitionScope, true},
+        {FFlag::LuwuExternTypeUseDefinitionScope, true},
         {FFlag::LuwuExternTypeGenericMethods, true},
     };
 
@@ -1357,7 +1357,7 @@ TEST_CASE_FIXTURE(Fixture, "extern_type_generic_method_infers_union_return_from_
     // from the argument, and the call's result type should reflect the full union.
     ScopedFastFlag sffs[] = {
         {FFlag::DebugLuauForceOldSolver, false},
-        {FFlag::LuauExternTypeUseDefinitionScope, true},
+        {FFlag::LuwuExternTypeUseDefinitionScope, true},
         {FFlag::LuwuExternTypeGenericMethods, true},
     };
 
@@ -1397,7 +1397,7 @@ TEST_CASE_FIXTURE(Fixture, "extern_type_generic_method_explicit_instantiation")
 {
     ScopedFastFlag sffs[] = {
         {FFlag::DebugLuauForceOldSolver, false},
-        {FFlag::LuauExternTypeUseDefinitionScope, true},
+        {FFlag::LuwuExternTypeUseDefinitionScope, true},
         {FFlag::LuwuExternTypeGenericMethods, true},
     };
 
@@ -1420,7 +1420,7 @@ TEST_CASE_FIXTURE(Fixture, "extern_type_generic_method_explicit_instantiation_mi
 {
     ScopedFastFlag sffs[] = {
         {FFlag::DebugLuauForceOldSolver, false},
-        {FFlag::LuauExternTypeUseDefinitionScope, true},
+        {FFlag::LuwuExternTypeUseDefinitionScope, true},
         {FFlag::LuwuExternTypeGenericMethods, true},
     };
 
@@ -1442,7 +1442,7 @@ TEST_CASE_FIXTURE(Fixture, "extern_type_generics_instantiate")
 {
     ScopedFastFlag sffs[] = {
         {FFlag::DebugLuauForceOldSolver, false},
-        {FFlag::LuauExternTypeUseDefinitionScope, true},
+        {FFlag::LuwuExternTypeUseDefinitionScope, true},
         {FFlag::LuwuGenericNominals, true},
     };
 
@@ -1470,7 +1470,7 @@ TEST_CASE_FIXTURE(Fixture, "extern_type_generic_default_is_used_when_omitted")
 {
     ScopedFastFlag sffs[] = {
         {FFlag::DebugLuauForceOldSolver, false},
-        {FFlag::LuauExternTypeUseDefinitionScope, true},
+        {FFlag::LuwuExternTypeUseDefinitionScope, true},
         {FFlag::LuwuGenericNominals, true},
     };
 
@@ -1498,7 +1498,7 @@ TEST_CASE_FIXTURE(Fixture, "extern_type_generic_default_can_reference_earlier_pa
 {
     ScopedFastFlag sffs[] = {
         {FFlag::DebugLuauForceOldSolver, false},
-        {FFlag::LuauExternTypeUseDefinitionScope, true},
+        {FFlag::LuwuExternTypeUseDefinitionScope, true},
         {FFlag::LuwuGenericNominals, true},
     };
 
@@ -1523,7 +1523,7 @@ TEST_CASE_FIXTURE(Fixture, "extern_type_generics_nested_instantiation")
 {
     ScopedFastFlag sffs[] = {
         {FFlag::DebugLuauForceOldSolver, false},
-        {FFlag::LuauExternTypeUseDefinitionScope, true},
+        {FFlag::LuwuExternTypeUseDefinitionScope, true},
         {FFlag::LuwuGenericNominals, true},
     };
 
@@ -1552,7 +1552,7 @@ TEST_CASE_FIXTURE(Fixture, "extern_type_generics_nested_instantiation_with_unuse
 {
     ScopedFastFlag sffs[] = {
         {FFlag::DebugLuauForceOldSolver, false},
-        {FFlag::LuauExternTypeUseDefinitionScope, true},
+        {FFlag::LuwuExternTypeUseDefinitionScope, true},
         {FFlag::LuwuGenericNominals, true},
     };
 
@@ -1580,7 +1580,7 @@ TEST_CASE_FIXTURE(Fixture, "extern_type_generics_two_params_with_method")
 {
     ScopedFastFlag sffs[] = {
         {FFlag::DebugLuauForceOldSolver, false},
-        {FFlag::LuauExternTypeUseDefinitionScope, true},
+        {FFlag::LuwuExternTypeUseDefinitionScope, true},
         {FFlag::LuwuGenericNominals, true},
     };
 
@@ -1624,7 +1624,7 @@ TEST_CASE_FIXTURE(Fixture, "extern_type_generics_explicit_partial_instantiation_
     // works correctly, so this is specific to generic nominal (extern type) expansion.
     ScopedFastFlag sffs[] = {
         {FFlag::DebugLuauForceOldSolver, false},
-        {FFlag::LuauExternTypeUseDefinitionScope, true},
+        {FFlag::LuwuExternTypeUseDefinitionScope, true},
         {FFlag::LuwuGenericNominals, true},
     };
 
@@ -1660,7 +1660,7 @@ TEST_CASE_FIXTURE(Fixture, "extern_type_generics_independent_instantiations_are_
     // return type) are different TypeIds but must still be recognized as the same nominal type.
     ScopedFastFlag sffs[] = {
         {FFlag::DebugLuauForceOldSolver, false},
-        {FFlag::LuauExternTypeUseDefinitionScope, true},
+        {FFlag::LuwuExternTypeUseDefinitionScope, true},
         {FFlag::LuwuGenericNominals, true},
         {FFlag::LuauHigherOrderGenericInference, true},
     };
@@ -1693,7 +1693,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "extern_type_generics_typeof_refines_generic_
     // extern type's TypeFun.
     ScopedFastFlag sffs[] = {
         {FFlag::DebugLuauForceOldSolver, false},
-        {FFlag::LuauExternTypeUseDefinitionScope, true},
+        {FFlag::LuwuExternTypeUseDefinitionScope, true},
         {FFlag::LuwuGenericNominals, true},
         {FFlag::LuauHigherOrderGenericInference, true},
     };
@@ -1729,7 +1729,7 @@ TEST_CASE_FIXTURE(Fixture, "extern_type_generics_unconstrained_generic_resolved_
     // generic instead.
     ScopedFastFlag sffs[] = {
         {FFlag::DebugLuauForceOldSolver, false},
-        {FFlag::LuauExternTypeUseDefinitionScope, true},
+        {FFlag::LuwuExternTypeUseDefinitionScope, true},
         {FFlag::LuwuGenericNominals, true},
         {FFlag::LuauHigherOrderGenericInference, true},
     };
@@ -1762,19 +1762,21 @@ TEST_CASE_FIXTURE(Fixture, "extern_type_generics_unconstrained_generic_resolved_
 
 TEST_CASE_FIXTURE(Fixture, "extern_type_generics_inferred_from_union_argument_member")
 {
-    // `expect<T, E>(r: T | Exception<E>): T` called with an argument of type
-    // `string | Exception<FileIoError>` must bind T = string and E = FileIoError from matching
-    // up the union members positionally by shape, not by unifying every argument-union member
-    // against every parameter-union member indiscriminately. Two bugs used to conspire here:
-    // (1) Unifier2 had no ExternType-vs-ExternType case at all, so `Exception<E>`'s own type
-    // argument could never be bound from a concrete `Exception<FileIoError>` argument; and (2)
-    // union-member unification tried every (subOption, superOption) pair whose `areCompatible`
-    // check passed, and a bare free type (standing in for `T`) is trivially "compatible" with
-    // anything -- so `Exception<FileIoError>` also got unified against `T`, polluting T's lower
-    // bound to `string | Exception<FileIoError>` instead of leaving it as plain `string`.
+    // `expect<T, E>(r: T | Exception<E>): T` is called with an argument of type
+    // `string | Exception<FileIoError>`. It must bind T = string and E = FileIoError by matching up the
+    // union members positionally by shape, not by unifying every argument-union member against every
+    // parameter-union member.
+    //
+    // Regression test for two bugs that combined here:
+    // 1. Unifier2 had no ExternType-vs-ExternType case, so `Exception<E>`'s type argument could never be
+    //    bound from a concrete `Exception<FileIoError>` argument.
+    // 2. Union-member unification tried every (subOption, superOption) pair whose `areCompatible` check
+    //    passed. A bare free type (standing in for `T`) is trivially "compatible" with anything, so
+    //    `Exception<FileIoError>` was also unified against `T`. That widened T's lower bound to
+    //    `string | Exception<FileIoError>` instead of leaving it as `string`.
     ScopedFastFlag sffs[] = {
         {FFlag::DebugLuauForceOldSolver, false},
-        {FFlag::LuauExternTypeUseDefinitionScope, true},
+        {FFlag::LuwuExternTypeUseDefinitionScope, true},
         {FFlag::LuwuGenericNominals, true},
         {FFlag::LuauHigherOrderGenericInference, true},
     };
@@ -1803,18 +1805,19 @@ TEST_CASE_FIXTURE(Fixture, "extern_type_generics_inferred_from_union_argument_me
 
 TEST_CASE_FIXTURE(Fixture, "extern_type_generics_mismatch_reasoning_is_terse_and_context_aware")
 {
-    // Regression test for a confusing TypeMismatch explanation. Two problems used to compound
-    // here: (1) when the sub type's reasoning path drilled further into a union than the super
-    // type's path did, the old phrasing repeated their shared "it returns the 1st entry in the
-    // type pack" lead-in twice back-to-back; and (2) even fixed, that lead-in is jargon ("type
-    // pack", "component of the union") that doesn't help readers and is redundant with the
-    // wanted/got types already printed above it. The mismatch is entirely about the function's
-    // return type, so the whole explanation should read as a single short, plain-English line:
-    // a context-aware preamble ("Expected this function to return") instead of the generic
-    // "Expected this to be", and a bare leaf comparison with no path narration at all.
+    // Regression test for a confusing TypeMismatch explanation. The mismatch is entirely about the
+    // function's return type, so the explanation is one short, plain-English line: a context-aware
+    // preamble ("Expected this function to return") instead of the generic "Expected this to be",
+    // followed by the bare leaf comparison, with no narration of the path to it.
+    //
+    // Two problems compounded here:
+    // 1. When the sub type's reasoning path went further into a union than the super type's path,
+    //    their shared "it returns the 1st entry in the type pack" lead-in was printed twice in a row.
+    // 2. Even printed once, that lead-in is jargon ("type pack", "component of the union"). It does not
+    //    help readers, and it repeats the wanted and got types already printed above it.
     ScopedFastFlag sffs[] = {
         {FFlag::DebugLuauForceOldSolver, false},
-        {FFlag::LuauExternTypeUseDefinitionScope, true},
+        {FFlag::LuwuExternTypeUseDefinitionScope, true},
         {FFlag::LuwuGenericNominals, true},
         {FFlag::LuauHigherOrderGenericInference, true},
         {FFlag::LuauDropUnionSubtypeReasoning, true},
@@ -1859,7 +1862,7 @@ TEST_CASE_FIXTURE(Fixture, "extern_type_generics_independent_instantiations_are_
     // different TypeIds.
     ScopedFastFlag sffs[] = {
         {FFlag::DebugLuauForceOldSolver, false},
-        {FFlag::LuauExternTypeUseDefinitionScope, true},
+        {FFlag::LuwuExternTypeUseDefinitionScope, true},
         {FFlag::LuwuGenericNominals, true},
         {FFlag::LuauHigherOrderGenericInference, true},
     };
@@ -1988,7 +1991,7 @@ TEST_CASE_FIXTURE(Fixture, "extern_type_generics_method_self_type_is_parameteriz
     // fails to match against `self`, since the two would be nominally unrelated.
     ScopedFastFlag sffs[] = {
         {FFlag::DebugLuauForceOldSolver, false},
-        {FFlag::LuauExternTypeUseDefinitionScope, true},
+        {FFlag::LuwuExternTypeUseDefinitionScope, true},
         {FFlag::LuwuGenericNominals, true},
         {FFlag::LuauHigherOrderGenericInference, true},
     };
@@ -2029,7 +2032,7 @@ TEST_CASE_FIXTURE(Fixture, "extern_type_generics_do_not_crash_old_solver")
     // not a crash.
     ScopedFastFlag sffs[] = {
         {FFlag::DebugLuauForceOldSolver, true},
-        {FFlag::LuauExternTypeUseDefinitionScope, true},
+        {FFlag::LuwuExternTypeUseDefinitionScope, true},
         {FFlag::LuwuGenericNominals, true},
         {FFlag::LuwuExternTypeGenericMethods, true},
     };
