@@ -210,6 +210,11 @@ public:
 
     const int classIndex;
     Location location;
+
+    // Luwu: set on the smallest node whose own syntax only Luwu accepts, so tools and the parser can tell
+    // Luwu-only syntax apart from Luau syntax. Upstream Luau has no such field.
+    // Children of a Luwu-only node aren't marked unless their own syntax is Luwu-only.
+    bool luwuOnly = false;
 };
 
 class AstAttr : public AstNode

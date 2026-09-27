@@ -12489,10 +12489,15 @@ end
     // 0 is writeConst, 1 is writeOther, 2 is K's `__init`
     std::string init = compileFunction(source, 2, 2);
 
-    // one call remains, to writeConst; writeOther's `obj.d = 1` was inlined next to the prologue's defaults
-    size_t call = init.find("\nCALL ");
-    REQUIRE(call != std::string::npos);
-    CHECK(init.find("\nCALL ", call + 1) == std::string::npos);
+    // one call remains, to writeConst; writeOther's `obj.d = 1` was inlined next to the prologue's defaults.
+    // With LuauEmitCallFeedback, a call to a function that could have been inlined is a CALLFB.
+    size_t calls = 0;
+    for (const char* op : {"\nCALL ", "\nCALLFB "})
+    {
+        for (size_t at = init.find(op); at != std::string::npos; at = init.find(op, at + 1))
+            ++calls;
+    }
+    CHECK_EQ(calls, 1);
     CHECK(init.find("['d']") != init.rfind("['d']"));
 }
 

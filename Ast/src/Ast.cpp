@@ -334,6 +334,12 @@ AstExprFunction::AstExprFunction(
     , debugname(debugname)
     , argLocation(argLocation)
 {
+    // Luwu Function Default Arguments (rfcs/function-default-arguments.md): upstream Luau has no default arguments.
+    for (AstExpr* argDefault : argsDefaults)
+    {
+        if (argDefault)
+            luwuOnly = true;
+    }
 }
 
 void AstExprFunction::visit(AstVisitor* visitor)
@@ -1072,6 +1078,10 @@ AstStatClass::AstStatClass(
     , keywordLocation(keywordLocation)
 {
     LUAU_ASSERT(FFlag::DebugLuauUserDefinedClasses);
+
+    // Luwu Classes (rfcs/classes): upstream Luau is designing its own class syntax, and we don't know what
+    // it will settle on, so every class declaration counts as Luwu-only.
+    luwuOnly = true;
 }
 
 void AstStatClass::visit(AstVisitor* visitor)
@@ -1229,6 +1239,19 @@ AstStatDeclareExternType::AstStatDeclareExternType(
     , classLocation(classLocation)
     , extendsLocation(extendsLocation)
 {
+    // Luwu Generic Nominals (rfcs/generics-on-extern-types.md): upstream Luau parses no generic parameters on an
+    // extern type or on its methods.
+    // A method isn't a node of its own, so a generic method marks the whole declaration.
+    if (generics.size > 0 || genericPacks.size > 0)
+        luwuOnly = true;
+
+    for (const AstDeclaredExternTypeProperty& prop : props)
+    {
+        const AstTypeFunction* method = prop.isMethod ? prop.ty->as<AstTypeFunction>() : nullptr;
+        bool isGenericMethod = method && (method->generics.size > 0 || method->genericPacks.size > 0);
+        if (isGenericMethod)
+            luwuOnly = true;
+    }
 }
 
 void AstStatDeclareExternType::visit(AstVisitor* visitor)

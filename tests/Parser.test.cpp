@@ -2216,6 +2216,27 @@ TEST_CASE_FIXTURE(Fixture, "default_arguments_are_gated")
     parse("local function foo(x = 1) end");
 }
 
+TEST_CASE_FIXTURE(Fixture, "default_arguments_are_luwu_only")
+{
+    ScopedFastFlag sff{FFlag::LuwuDefaultArguments, true};
+
+    AstStatBlock* stat = parse(R"(
+        local function withDefault(x, y = 1) end
+        local function withoutDefault(x, y) end
+    )");
+    REQUIRE(stat != nullptr);
+    REQUIRE_EQ(2, stat->body.size);
+
+    AstStatLocalFunction* withDefault = stat->body.data[0]->as<AstStatLocalFunction>();
+    REQUIRE(withDefault != nullptr);
+    CHECK(withDefault->func->luwuOnly);
+    CHECK(!withDefault->luwuOnly);
+
+    AstStatLocalFunction* withoutDefault = stat->body.data[1]->as<AstStatLocalFunction>();
+    REQUIRE(withoutDefault != nullptr);
+    CHECK(!withoutDefault->func->luwuOnly);
+}
+
 TEST_CASE_FIXTURE(Fixture, "default_arguments_are_not_allowed_in_declarations")
 {
     ScopedFastFlag sff{FFlag::LuwuDefaultArguments, true};
@@ -2711,6 +2732,7 @@ TEST_CASE_FIXTURE(Fixture, "extern_type_generic_methods")
 
     AstStatDeclareExternType* cat = stat->body.data[0]->as<AstStatDeclareExternType>();
     REQUIRE(cat != nullptr);
+    CHECK(cat->luwuOnly);
     REQUIRE_EQ(2, cat->props.size);
 
     AstTypeFunction* meow = cat->props.data[0].ty->as<AstTypeFunction>();
@@ -2800,6 +2822,9 @@ TEST_CASE_FIXTURE(Fixture, "extern_type_generic_property_syntax_workaround_is_un
     // so the annotation must (and does, above) spell it out explicitly.
     CHECK(!cat->props.data[0].isMethod);
 
+    // and a generic function type as a property is upstream Luau syntax
+    CHECK(!cat->luwuOnly);
+
     AstTypeFunction* meow = cat->props.data[0].ty->as<AstTypeFunction>();
     REQUIRE(meow != nullptr);
     REQUIRE_EQ(1, meow->generics.size);
@@ -2836,6 +2861,7 @@ TEST_CASE_FIXTURE(Fixture, "extern_type_generics")
 
     AstStatDeclareExternType* box = stat->body.data[0]->as<AstStatDeclareExternType>();
     REQUIRE(box != nullptr);
+    CHECK(box->luwuOnly);
     REQUIRE_EQ(1, box->generics.size);
     CHECK_EQ(box->generics.data[0]->name, "T");
     CHECK_EQ(0, box->genericPacks.size);
@@ -4985,6 +5011,38 @@ TEST_CASE_FIXTURE(Fixture, "classes_can_only_have_functions_and_properties")
     )",
         "Only class fields and functions can be declared within a class"
     );
+}
+
+TEST_CASE_FIXTURE(Fixture, "class_declaration_is_luwu_only")
+{
+    ScopedFastFlag sffs[] = {
+        {FFlag::DebugLuauUserDefinedClasses, true},
+        {FFlag::LuwuBetterUserDefinedClasses, true},
+    };
+
+    ParseResult result = tryParse(R"(
+        class Cat
+            name: string
+            function meow(self) end
+        end
+        local x = 1
+    )");
+
+    REQUIRE(result.errors.empty());
+    REQUIRE_EQ(result.root->body.size, 2);
+
+    const AstStatClass* cls = result.root->body.data[0]->as<AstStatClass>();
+    REQUIRE(cls);
+    CHECK(cls->luwuOnly);
+
+    // a class method is an ordinary function
+    REQUIRE_EQ(cls->members.size, 2);
+    const AstClassMethod* method = cls->members.data[1].get_if<AstClassMethod>();
+    REQUIRE(method);
+    CHECK(!method->function->luwuOnly);
+
+    CHECK(!result.root->body.data[1]->luwuOnly);
+    CHECK(!result.root->luwuOnly);
 }
 
 TEST_CASE_FIXTURE(Fixture, "class_extends_is_rejected")

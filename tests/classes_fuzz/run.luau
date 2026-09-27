@@ -2,11 +2,12 @@
     Differential and crash fuzzer for Luwu classes. Requires seal 0.8.x at >= 0.8.1 (ChildProcess:status);
     seal 0.9.0 breaks the std APIs used here.
 
-        seal tests/classes_fuzz/run.luau --luau build-assert/luau [--start 1] [--count 100] [--jobs 16] [--work DIR] [--keep]
+        seal tests/classes_fuzz/run.luau --luau build-assert/luau [--start 1] [--count 100] [--jobs 16] [--work DIR] [--keep] [--no-codegen]
 
     For every seed, gen.luau writes a random class program (a main module plus a required module) and this script
     runs it with the given `luau` CLI at -O0/-O1/-O2, each interpreted, with --codegen and with --codegen-cold. Use an
-    assert-enabled build (build-assert/) so internal invariants are checked too.
+    assert-enabled build (build-assert/) so internal invariants are checked too. Pass --no-codegen on a platform
+    without native code generation (e.g. 32-bit Windows) to run only the interpreted configs.
 
     Reported problems:
       CRASH        the process died from a signal or dumped core (asserts land here)
@@ -78,7 +79,8 @@ const parsed = args.parse("classes_fuzz", "differential and crash fuzzing for Lu
     args.named("--count", "number of programs to generate"):default("100"),
     args.named("--jobs", "processes to run at once"):default("16"),
     args.named("--work", "directory for generated programs"):default("classes_fuzz_work"),
-    args.flag("--keep", "keep every seed's files, not just the ones with problems")
+    args.flag("--keep", "keep every seed's files, not just the ones with problems"),
+    args.flag("--no-codegen", "run only the interpreted configs, for a platform without native code generation")
 )
 
 -- seal 0.8.1 only applies `:validate` to positional arguments, so named numbers are checked here
@@ -97,18 +99,23 @@ const firstSeed = positiveInteger("--start")
 const seedCount = positiveInteger("--count")
 const maxJobs = positiveInteger("--jobs")
 const work = fs.path.absolutize(parsed:expect<<string>>("--work"))
-const keepAll = parsed.flags["keep"] == true
+const keepAll = parsed.flags["--keep"] == true
+const withCodegen = parsed.flags["--no-codegen"] ~= true
 
 const configs: { Config } = {}
 for opt = 0, 2 do
     table.insert(configs, { opt = opt, mode = "", trustAnnotations = false, tag = `O{opt}` })
-    table.insert(configs, { opt = opt, mode = "--codegen", trustAnnotations = false, tag = `O{opt}cg` })
-    table.insert(configs, { opt = opt, mode = "--codegen-cold", trustAnnotations = false, tag = `O{opt}cgcold` })
+    if withCodegen then
+        table.insert(configs, { opt = opt, mode = "--codegen", trustAnnotations = false, tag = `O{opt}cg` })
+        table.insert(configs, { opt = opt, mode = "--codegen-cold", trustAnnotations = false, tag = `O{opt}cgcold` })
+    end
 end
 -- annotation-driven inlining only exists at O2
 table.insert(configs, { opt = 2, mode = "", trustAnnotations = true, tag = "O2trust" })
-table.insert(configs, { opt = 2, mode = "--codegen", trustAnnotations = true, tag = "O2trustcg" })
-table.insert(configs, { opt = 2, mode = "--codegen-cold", trustAnnotations = true, tag = "O2trustcgcold" })
+if withCodegen then
+    table.insert(configs, { opt = 2, mode = "--codegen", trustAnnotations = true, tag = "O2trustcg" })
+    table.insert(configs, { opt = 2, mode = "--codegen-cold", trustAnnotations = true, tag = "O2trustcgcold" })
+end
 
 local function contains(haystack: string, needle: string): boolean
     return string.find(haystack, needle, 1, true) ~= nil

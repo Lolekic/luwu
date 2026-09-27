@@ -5624,7 +5624,13 @@ TEST_CASE("ClassesFuzz")
     std::string work = std::string(tmp && *tmp ? tmp : "/tmp") + "/luwu_classes_fuzz_" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
 
     std::string command = "\"" + seal + "\" \"" LUWU_CLASSES_FUZZ_DIR "/run.luau\" --luau \"" + cli + "\" --start " + start + " --count " + count +
-                          " --jobs " + std::to_string(jobs) + " --work \"" + work + "\" 2>&1";
+                          " --jobs " + std::to_string(jobs) + " --work \"" + work + "\"";
+
+    // the CLI asserts when asked for native code on a platform without it (e.g. 32-bit Windows)
+    if (!luau_codegen_supported())
+        command += " --no-codegen";
+
+    command += " 2>&1";
 
     std::string output;
     int exitCode = runCommand(command, output);
