@@ -1778,7 +1778,7 @@ void translateInstGetTableKS(IrBuilder& build, const Instruction* pc, int pcpos)
         return;
     }
 
-    // Luwu Classes (rfcs/classes.md): instance field access on an object, and static member access on
+    // Luwu Classes (rfcs/classes): instance field access on an object, and static member access on
     // a class. These two paths run only when the compiler typed the register as an object or a class.
     // Anything else takes the table path below (for LBC_TYPE_ANY, see the comment there).
     //
@@ -1883,7 +1883,7 @@ void translateInstGetTableKS(IrBuilder& build, const Instruction* pc, int pcpos)
     build.inst(IrCmd::JUMP, next);
 }
 
-// Luwu Classes (rfcs/classes.md): read a member at a constant offset on a receiver whose class the
+// Luwu Classes (rfcs/classes): read a member at a constant offset on a receiver whose class the
 // compiler proved. Nothing is checked: the receiver is an object of that class in valid bytecode (see
 // VM_CASE(LOP_GETOBJECTMEMBER), which asserts it).
 void translateInstGetObjectMember(IrBuilder& build, const Instruction* pc, int pcpos)
@@ -1898,7 +1898,7 @@ void translateInstGetObjectMember(IrBuilder& build, const Instruction* pc, int p
     build.inst(IrCmd::STORE_TVALUE, build.vmReg(ra), tv);
 }
 
-// Luwu Classes (rfcs/classes.md): construction. The FIELDS form (a primary constructor, or a POD class
+// Luwu Classes (rfcs/classes): construction. The FIELDS form (a primary constructor, or a POD class
 // constructed with every field) is lowered natively: allocate uninitialized, then copy each argument
 // register into its member. The copies are ordinary IR stores, so const prop can forward a value that is
 // still unboxed (the `self.x + o.x` computed just before) straight into the member.
@@ -1986,7 +1986,7 @@ void translateInstSetTableKS(IrBuilder& build, const Instruction* pc, int pcpos)
         return;
     }
 
-    // Luwu Classes (rfcs/classes.md): writing an instance field on an object, e.g. `self.x = ...`.
+    // Luwu Classes (rfcs/classes): writing an instance field on an object, e.g. `self.x = ...`.
     //
     // This path runs only when the compiler typed the receiver as an object. The receiver's tag is
     // still checked, and a value that isn't an object exits to the VM. Every other receiver type takes
@@ -2203,7 +2203,7 @@ bool translateInstNamecall(IrBuilder& build, const Instruction* pc, int pcpos)
     IrOp next = build.blockAtInst(pcpos + getOpLength(LuauOpcode(LOP_NAMECALL)));
     IrOp fallback = build.fallbackBlock(pcpos);
 
-    // Luwu Classes (rfcs/classes.md): method resolution on an object receiver (`self:method()`).
+    // Luwu Classes (rfcs/classes): method resolution on an object receiver (`self:method()`).
     // Resolve the method address inline from the class members using the cached slot, store method
     // into ra and self into ra+1, then fall through to CALL -- avoiding an interpreter trampoline.
     auto emitObjectNamecall = [&]()
@@ -2406,7 +2406,7 @@ void translateInstCmpProto(IrBuilder& build, const Instruction* pc, int pcpos)
 
 void translateInstJumpXIsa(IrBuilder& build, const Instruction* pc, int pcpos)
 {
-    // Luwu Classes (rfcs/classes.md): fused class.isinstance(value, class) test-and-branch. Without
+    // Luwu Classes (rfcs/classes): fused class.isinstance(value, class) test-and-branch. Without
     // LBC_JUMPXISA_CHECKCLASS the compiler guarantees the class register holds a class; with it, a
     // non-class exits to the interpreter at this instruction, which raises the builtin's error.
     int ra = LUAU_INSN_A(*pc);

@@ -1,5 +1,5 @@
 -- This file is part of the Luau programming language and is licensed under MIT License; see LICENSE.txt for details
--- Luwu Classes (rfcs/classes/classes.md): regression tests for fixes from the classes review (compiler).
+-- Luwu Classes (rfcs/classes): regression tests for fixes from the classes review (compiler).
 --!nocheck
 print("testing classes fixes (compiler)")
 

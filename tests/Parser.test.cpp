@@ -4433,7 +4433,7 @@ TEST_CASE_FIXTURE(Fixture, "class_primary_constructor_with_no_parameters")
     };
 
     // `class Counter()` is not the same as `class Counter`: the empty parameter list is what takes
-    // away the default table constructor (rfcs/classes.md), so it has to survive parsing.
+    // away the default table constructor (rfcs/classes), so it has to survive parsing.
     ParseResult result = tryParse(R"(
         class Counter()
         end
@@ -4572,7 +4572,7 @@ TEST_CASE_FIXTURE(Fixture, "class_primary_constructor_parses_qualifiers_on_param
     };
 
     // Kotlin-style: a parameter may carry the access specifier and `const` modifier of the field it
-    // declares, instead of restating the field in the class body (rfcs/classes.md).
+    // declares, instead of restating the field in the class body (rfcs/classes).
     AstStatBlock* block = parse(R"(
 class SshKey private (
     public const public_key: string,
@@ -4726,7 +4726,7 @@ end
     );
 
     // a `private` primary constructor is not a member qualifier: it does not force the rest of the
-    // class to qualify itself (rfcs/classes.md)
+    // class to qualify itself (rfcs/classes)
     AstStatBlock* block = parse(R"(
 class PositiveNumber private (const inner: number)
     function new(n: number) return PositiveNumber(n) end
@@ -5040,7 +5040,7 @@ TEST_CASE_FIXTURE(Fixture, "class_members_may_not_be_named_after_keywords")
         {FFlag::LuwuBetterUserDefinedClasses, true},
     };
 
-    // rfcs/classes.md: `class`, `public`, `private`, `const`, `extends` and `implements` are not
+    // rfcs/classes: `class`, `public`, `private`, `const`, `extends` and `implements` are not
     // allowed as member names, in any of the positions a member can be declared in.
     for (const char* keyword : {"class", "public", "private", "const", "extends", "implements"})
     {
@@ -5460,7 +5460,7 @@ TEST_CASE_FIXTURE(Fixture, "classes_cannot_have_members_named_public")
         {FFlag::LuwuBetterUserDefinedClasses, true},
     };
 
-    // rfcs/classes.md: a member named after an access specifier is rejected, both where it reads as a
+    // rfcs/classes: a member named after an access specifier is rejected, both where it reads as a
     // member name outright and where a qualifier precedes it.
     ParseResult result = tryParse(R"(
         class Foobar

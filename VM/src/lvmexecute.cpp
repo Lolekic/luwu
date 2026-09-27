@@ -91,7 +91,7 @@ LUAU_FLAGVERSION(LuauBackedgeHeapCheck, 2)
 
 #define VM_PATCH_OP(pc, op) *const_cast<Instruction*>(pc) = (uint8_t(op) | (0xffffff00u & *(pc)))
 #define VM_PATCH_C(pc, slot) *const_cast<Instruction*>(pc) = ((uint8_t(slot) << 24) | (0x00ffffffu & *(pc)))
-// Luwu Classes (rfcs/classes.md): caches a member offset in C, see LUAR_MAX_CACHED_MEMBER_SLOT
+// Luwu Classes (rfcs/classes): caches a member offset in C, see LUAR_MAX_CACHED_MEMBER_SLOT
 #define VM_PATCH_MEMBER_SLOT(pc, offset) \
     do \
     { \
@@ -3835,7 +3835,7 @@ reentry:
 
             VM_CASE(LOP_NEWOBJECT)
             {
-                // Luwu Classes (rfcs/classes.md): construct an instance of a statically resolved class directly.
+                // Luwu Classes (rfcs/classes): construct an instance of a statically resolved class directly.
                 Instruction insn = *pc++;
                 uint32_t aux = *pc++;
                 StkId ra = VM_REG(LUAU_INSN_A(insn));
@@ -3869,7 +3869,7 @@ reentry:
 
                 LuauClass* classdef = classvalue(classReg);
 
-                // Luwu Classes (rfcs/classes.md): a private `__init` is only callable from inside its
+                // Luwu Classes (rfcs/classes): a private `__init` is only callable from inside its
                 // own class. The `__call` path gets that from luaR_createobject, and NEWOBJECT exists
                 // to skip that C frame, so without this the fast path would be a hole in `private`.
                 //
@@ -3955,7 +3955,7 @@ reentry:
 
             VM_CASE(LOP_GETOBJECTMEMBER)
             {
-                // Luwu Classes (rfcs/classes.md): read `self.field` at a known offset, skipping all of
+                // Luwu Classes (rfcs/classes): read `self.field` at a known offset, skipping all of
                 // GETTABLEKS's per-access work -- no slot cache, no name compare, no private-access
                 // check. That is only sound under what the compiler guarantees at every emit site (see
                 // provenSelfMemberOffset in Compiler.cpp). The receiver is one of:
@@ -4003,7 +4003,7 @@ reentry:
 
             VM_CASE(LOP_JUMPXISA)
             {
-                // Luwu Classes (rfcs/classes.md): fused class.isinstance(value, class) test-and-branch.
+                // Luwu Classes (rfcs/classes): fused class.isinstance(value, class) test-and-branch.
                 Instruction insn = *pc++;
                 uint32_t aux = *pc;
                 StkId ra = VM_REG(LUAU_INSN_A(insn));

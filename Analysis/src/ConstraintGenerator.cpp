@@ -1079,7 +1079,7 @@ void ConstraintGenerator::prototypeTypeDefinitions(const ScopePtr& scope, AstSta
             // property either has a default value or there are no properties at all.
             bool anyRequiredCtorArg = false;
 
-            // Luwu Classes (rfcs/classes.md): a primary constructor's parameters each declare a field
+            // Luwu Classes (rfcs/classes): a primary constructor's parameters each declare a field
             // (public and mutable unless qualified), unless the class body restates the parameter -- in which case the restatement is
             // the declaration, and carries the access specifier and modifiers. The constructor's own
             // type is built from the parameters in the second pass, once their annotations can be
@@ -1145,7 +1145,7 @@ void ConstraintGenerator::prototypeTypeDefinitions(const ScopePtr& scope, AstSta
                             prop.location = method.nameLocation;
                             if (FFlag::DebugLuauUserDefinedClasses && FFlag::LuwuBetterUserDefinedClasses)
                                 prop.isPrivate = method.visibility == AstClassMemberVisibility::Private;
-                            // Luwu Classes (rfcs/classes.md): an instance method is also readable through the
+                            // Luwu Classes (rfcs/classes): an instance method is also readable through the
                             // class value, with the same type (`self` is the object type): `Cls.method(obj)`
                             // and `Cls.method` as a value are how it is called without method-call syntax.
                             // A metamethod stays on the instance metatable only.
@@ -2751,7 +2751,7 @@ ControlFlow ConstraintGenerator::visit(const ScopePtr& scope, AstStatClass* stat
         );
     }
 
-    // Luwu Classes (rfcs/classes.md): a primary constructor's parameters are in scope for the class's
+    // Luwu Classes (rfcs/classes): a primary constructor's parameters are in scope for the class's
     // field initializer expressions and nowhere else, so they are bound in a scope of their own that
     // the methods below are deliberately not checked in.
     ScopePtr initializerScope = bodyScope;
@@ -2970,7 +2970,7 @@ ControlFlow ConstraintGenerator::visit(const ScopePtr& scope, AstStatClass* stat
         );
     }
 
-    // Luwu Classes (rfcs/classes.md): with the parameters' types resolved, the constructor a primary
+    // Luwu Classes (rfcs/classes): with the parameters' types resolved, the constructor a primary
     // constructor implies can be built -- `Cat(name: string, age: number)` -- along with the `__init`
     // the RFC says it defines, and the field each parameter the class body didn't restate declares.
     if (const AstClassPrimaryConstructor* primaryConstructor = statClass->primaryConstructor)

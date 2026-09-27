@@ -455,7 +455,7 @@ struct UnusableClass
 };
 
 // A class whose constructor is private (a `private` primary constructor or `private function __init`) and that
-// never calls it from its own body: nothing can ever create an instance (rfcs/classes.md).
+// never calls it from its own body: nothing can ever create an instance (rfcs/classes).
 struct UninstantiableClass
 {
     TypeId classTy;

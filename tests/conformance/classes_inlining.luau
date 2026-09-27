@@ -1,5 +1,5 @@
 --!nocheck
--- Luwu Classes (rfcs/classes.md): method inlining must never relocate a private access into a
+-- Luwu Classes (rfcs/classes): method inlining must never relocate a private access into a
 -- closure that does not own it.
 --
 -- At O2 the compiler inlines `obj:method()` bodies. Every runtime-checked `private` access -- a field, a

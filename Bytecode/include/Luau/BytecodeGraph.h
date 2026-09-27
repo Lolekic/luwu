@@ -145,7 +145,7 @@ enum class BcVmConstKind : uint8_t
     Table,
     Closure,
     Integer,
-    // Luwu Classes (rfcs/classes.md): LBC_CONSTANT_CLASS_SHAPE
+    // Luwu Classes (rfcs/classes): LBC_CONSTANT_CLASS_SHAPE
     ClassShape,
 };
 

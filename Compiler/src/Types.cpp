@@ -38,7 +38,7 @@ static LuauBytecodeType getPrimitiveType(AstName name)
         return LBC_TYPE_VECTOR;
     else if (name == "none")
         return LBC_TYPE_SYMNONE;
-    // Luwu Classes (rfcs/classes.md): the class tags are Luwu bytecode version 200 (see Bytecode.h), so they are only
+    // Luwu Classes (rfcs/classes): the class tags are Luwu bytecode version 200 (see Bytecode.h), so they are only
     // emitted while classes are. Without classes these are ordinary type names, as they are upstream.
     else if (FFlag::DebugLuauUserDefinedClasses && name == "class")
         return LBC_TYPE_CLASS;
@@ -81,7 +81,7 @@ static LuauBytecodeType getType(
             }
         }
 
-        // Luwu Classes (rfcs/classes.md): a generic of the enclosing class (`T` in `class List<T>`) is as
+        // Luwu Classes (rfcs/classes): a generic of the enclosing class (`T` in `class List<T>`) is as
         // unknown as a function's own generic. The userdata guess below would give `push(self, value: T)` an
         // entry guard that every real argument fails, sending each call back to the interpreter.
         if (isGeneric(ref->name, generics) || classGenerics.contains(ref->name))
@@ -93,7 +93,7 @@ static LuauBytecodeType getType(
         if (LuauBytecodeType prim = getPrimitiveType(ref->name); prim != LBC_TYPE_INVALID)
             return prim;
 
-        // Luwu Classes (rfcs/classes.md): a type annotation naming a declared class (`x: Account`)
+        // Luwu Classes (rfcs/classes): a type annotation naming a declared class (`x: Account`)
         // refers to an instance of that class, i.e. an object, not host userdata. The LBC_TYPE_USERDATA
         // guess below would make native codegen guard entry arguments against LUA_TUSERDATA, which every
         // real object fails.
@@ -199,7 +199,7 @@ static std::string getFunctionType(
         AstLocal* arg = func->args.data[i];
 
         LuauBytecodeType ty;
-        // Luwu Classes (rfcs/classes.md): a method's leading unannotated `self` is always an
+        // Luwu Classes (rfcs/classes): a method's leading unannotated `self` is always an
         // instance of the owning class, so type it as an object. `self` may not be annotated (the
         // parser rejects that), which is why this can't come through the annotation path below.
         if (isClassMethod && i == 0 && arg->name == "self" && arg->annotation == nullptr)
@@ -266,7 +266,7 @@ struct TypeMapVisitor : AstVisitor
     DenseHashMap<AstLocal*, const AstType*> resolvedLocals;
     DenseHashMap<AstExpr*, const AstType*> resolvedExprs;
     DenseHashMap<AstLocal*, const AstType*> functionReturnTypes{nullptr};
-    // Luwu Classes (rfcs/classes.md): method functions whose leading `self` param is a class
+    // Luwu Classes (rfcs/classes): method functions whose leading `self` param is a class
     // instance; populated in visit(AstStatClass) before descending into the method bodies.
     DenseHashSet<AstExprFunction*> classMethods{nullptr};
     // Names of the module's declared classes, so a type annotation naming a class (`x: Account`) or a
@@ -501,7 +501,7 @@ struct TypeMapVisitor : AstVisitor
         return true; // Let generic visitor step into all expressions
     }
 
-    // Luwu Classes (rfcs/classes.md): classes are hoisted, so a class is in scope for the whole module,
+    // Luwu Classes (rfcs/classes): classes are hoisted, so a class is in scope for the whole module,
     // including code above its declaration. Recording them all before the walk types an annotation or a
     // constructor call that precedes the declaration the same as one that follows it. Classes can only be
     // declared at the top level of the module.
@@ -649,7 +649,7 @@ struct TypeMapVisitor : AstVisitor
             {
                 if (i < node->values.size)
                 {
-                    // Luwu Classes (rfcs/classes.md): a class-typed initializer is propagated only to a local that
+                    // Luwu Classes (rfcs/classes): a class-typed initializer is propagated only to a local that
                     // is never written; the type covers the whole range and codegen guards it with a VM exit.
                     const AstType** typePtr = resolvedExprs.find(node->values.data[i]);
                     bool skipClassTypeOfWrittenLocal = typePtr && namesClass(*typePtr) && isWritten(var);
@@ -1073,14 +1073,14 @@ struct TypeMapVisitor : AstVisitor
             }
             else if (AstExprGlobal* global = node->func->as<AstExprGlobal>(); global && classNames.contains(global->name))
             {
-                // Luwu Classes (rfcs/classes.md): a class is referenced by name (the parser doesn't bind it as a
+                // Luwu Classes (rfcs/classes): a class is referenced by name (the parser doesn't bind it as a
                 // local, which is what lets it hoist), and calling it constructs a new instance
                 // (`Account(...)`), so the call result is an object.
                 recordResolvedType(node, &builtinTypes.objectType);
             }
             else if (AstExprIndexName* indexName = node->func->as<AstExprIndexName>())
             {
-                // Luwu Classes (rfcs/classes.md): a static call on a class (`Account.new(...)`) whose declared
+                // Luwu Classes (rfcs/classes): a static call on a class (`Account.new(...)`) whose declared
                 // return type names a class returns an object. Nothing checks that declared type. If it is
                 // wrong, codegen's guard on the hint fails and the rest of each calling function runs
                 // interpreted. So the result is only typed when annotations are trusted.

@@ -237,12 +237,12 @@ TEST_CASE("BytecodeIsStable")
     // Note: these *can* change retroactively *if* type version is bumped, but probably shouldn't
     LUAU_ASSERT(LBC_TYPE_BUFFER == 9); // type version 1
 
-    // Luwu (bytecode versioning): the mluau-vendored Luau that preceded Luwu emitted these under legacy version numbers, so legacy
+    // Luwu bytecode versioning: the mluau-vendored Luau that preceded Luwu emitted these under legacy version numbers, so legacy
     // bytecode that is loaded today can contain them (see "Luwu bytecode version history" in Bytecode.h)
     CHECK(LBF_BUFFER_ISFROZEN == 133);
     CHECK(LBC_TYPE_SYMNONE == 11);
 
-    // Luwu (bytecode versioning): the header of Luwu bytecode
+    // Luwu bytecode versioning: the header of Luwu bytecode
     CHECK(LWBC_MAGIC == 0xff);
     CHECK(LWBC_VERSION_WIP == 200);
 }
@@ -11307,7 +11307,7 @@ TEST_CASE("ClassReceiverTrustTiersDecideSelfCheck")
     // this test is about receivers the compiler knows only from an annotation
     ScopedFastFlag trustAnnotations{FFlag::DebugLuwuCompilerTrustsTypeAnnotations, true};
 
-    // rfcs/classes.md: every receiver resolution is either *proven* (a runtime check on this path
+    // rfcs/classes: every receiver resolution is either *proven* (a runtime check on this path
     // establishes the exact class) or *trusted* (an annotation says so). Both inline; only proven ones
     // may skip the inline site's CHECKSELFCLASS. This pins the split itself -- a new resolution path
     // must not acquire elision by accident.
@@ -11698,7 +11698,7 @@ TEST_CASE("ClassAnnotationReceiversNeedTheTrustFlag")
     ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
     ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
 
-    // rfcs/classes.md: by default the compiler acts only on receivers a runtime check on this path
+    // rfcs/classes: by default the compiler acts only on receivers a runtime check on this path
     // proves. A class known from a declared parameter, local or field type compiles to an ordinary
     // NAMECALL, so a value that does not match its annotation behaves as it does at O0/O1 instead of
     // raising at an inline site. DebugLuwuCompilerTrustsTypeAnnotations opts into the faster, stricter
@@ -11945,7 +11945,7 @@ TEST_CASE("ClassUsedBeforeItsDeclarationChecksItsBinding")
     ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
     ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
 
-    // rfcs/classes.md: a class binding is nil until its declaration runs, and a function declared above
+    // rfcs/classes: a class binding is nil until its declaration runs, and a function declared above
     // the class can run first. NEWOBJECT and an unchecked JUMPXISA take the class operand on trust, so code
     // above the declaration checks the binding; code below it can't see nil and pays nothing.
     const char* source = R"(
@@ -11986,7 +11986,7 @@ TEST_CASE("ClassPrimaryConstructorFieldsFormKeepsPrivateAccess")
     ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
     ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
 
-    // rfcs/classes.md: a primary constructor's initializers are class code, so the construction site may
+    // rfcs/classes: a primary constructor's initializers are class code, so the construction site may
     // compile them itself (NEWOBJECT ... FIELDS) only where that doesn't change what they may access.
     // Ordinary initializers keep the fast path everywhere; one naming a private member keeps it only inside
     // the class.
@@ -12075,7 +12075,7 @@ TEST_CASE("ClassRecursivePrimaryConstructorFallsBackToInit")
     ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
     ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
 
-    // rfcs/classes.md: an initializer may construct its own class. The site expands the initializers once,
+    // rfcs/classes: an initializer may construct its own class. The site expands the initializers once,
     // and the construction inside them goes through `__init`, as does the one in `__init` itself.
     const char* source = R"(
 class Node(public depth: number)
@@ -12103,7 +12103,7 @@ TEST_CASE("ClassAssertIsinstanceFailurePathRaises")
     ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
     ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
 
-    // rfcs/classes.md: the code after a fused `assert(class.isinstance(...))` is proven, so a failed check
+    // rfcs/classes: the code after a fused `assert(class.isinstance(...))` is proven, so a failed check
     // must never reach it. That has to hold even when `assert` has been replaced, through the environment,
     // by a function that returns instead of raising. So the assert call is followed by a second check that
     // raises.
@@ -12196,7 +12196,7 @@ TEST_CASE("ClassMethodInlinedIntoAnotherClassGainsNoPrivateAccess")
     ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
     ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
 
-    // rfcs/classes.md: an inlined body runs under the caller's closure. Cat's method inlined into a Dog
+    // rfcs/classes: an inlined body runs under the caller's closure. Cat's method inlined into a Dog
     // method would read Dog's private fields with Dog's access, which the call doesn't have, so a body that
     // names one keeps the call. One that doesn't still inlines.
     const char* source = R"(
@@ -12239,7 +12239,7 @@ TEST_CASE("ClassMethodPassingObjectsToPodConstructionKeepsItsCall")
     ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
     ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
 
-    // rfcs/classes.md: a POD constructor reads an object argument's fields with the private access of the
+    // rfcs/classes: a POD constructor reads an object argument's fields with the private access of the
     // nearest Lua frame. Once a method body is inlined, that frame is the caller's.
     // So consider a method of a class with private members whose body may hand an object to a POD
     // construction, either directly or through a C function like `pcall`. Called from outside the class,
@@ -12455,7 +12455,7 @@ TEST_CASE("ClassInitDoesNotInlineConstFieldWrites")
     ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
     ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
 
-    // rfcs/classes.md: a `const` field is written only by its class's `__init`, checked against the running
+    // rfcs/classes: a `const` field is written only by its class's `__init`, checked against the running
     // closure. A function `__init` calls must not be inlined into it if it may write one of the class's const
     // fields, or the write would pass. Other calls still inline.
     const char* source = R"(
@@ -12492,9 +12492,9 @@ TEST_CASE("InlinedDefaultArgumentReadsConstantOuterLocal")
 {
     ScopedFastFlag defaultArguments{FFlag::LuwuDefaultArguments, true};
 
-    // Luwu (default arguments): a default reading a local that folded to a constant is compiled at the inline
-    // site, where that local has no register; it has to fold there too. In the main chunk there is no upvalue
-    // to fall back on.
+    // Luwu Function Default Arguments (rfcs/function-default-arguments.md): a default reading a local that folded
+    // to a constant is compiled at the inline site, where that local has no register, so it has to fold
+    // there too. In the main chunk there is no upvalue to fall back on.
     const char* source = R"(
 local x = 1
 local function f(a, y = x)
@@ -12665,7 +12665,7 @@ TEST_CASE("ClassPrimaryConstructor")
     ScopedFastFlag _{FFlag::DebugLuauUserDefinedClasses, true};
     ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
 
-    // A primary constructor (rfcs/classes.md) declares a public field per parameter. A statically
+    // A primary constructor (rfcs/classes) declares a public field per parameter. A statically
     // resolved construction site doesn't call the synthesized `__init` at all: the parameters are
     // evaluated into registers, each field's initializer is compiled inline, and NEWOBJECT's
     // positional FIELDS form finishes the instance. The class body's own properties come first, then
@@ -12742,7 +12742,7 @@ TEST_CASE("ClassMethodInlineSelfCheck")
     // this test is about receivers the compiler knows only from an annotation
     ScopedFastFlag trustAnnotations{FFlag::DebugLuwuCompilerTrustsTypeAnnotations, true};
 
-    // Runtime checking of `self` for methods (rfcs/classes.md) must survive method inlining at -O2:
+    // Runtime checking of `self` for methods (rfcs/classes) must survive method inlining at -O2:
     // the inlined copy of the body never runs the callee's prologue, so compileInlinedCall re-emits
     // the CHECKSELFCLASS itself. Without it, a receiver whose annotation lies about its class would
     // silently run the wrong class's body.

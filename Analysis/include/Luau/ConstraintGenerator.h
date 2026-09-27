@@ -77,7 +77,7 @@ struct ClassDeclRecord
     // the default POD constructor's type.
     TypeId ctorTy = nullptr;
 
-    // Luwu Classes (rfcs/classes.md): the `__init` a primary constructor implies. Blocked until the
+    // Luwu Classes (rfcs/classes): the `__init` a primary constructor implies. Blocked until the
     // parameters' annotations have been resolved, alongside ctorTy. Null when the class has no
     // primary constructor -- a POD class's `__init` is resolved eagerly, and an explicit one is a
     // member like any other.
@@ -88,7 +88,7 @@ struct ClassDeclRecord
     std::vector<GenericTypeDefinition> typeParams;
     std::vector<GenericTypePackDefinition> typePackParams;
 
-    // Luwu Classes (rfcs/classes.md): for a generic class, the type of each instance method as read
+    // Luwu Classes (rfcs/classes): for a generic class, the type of each instance method as read
     // through the class value, blocked until the method is generalized (see GeneralizationConstraint).
     // A non-generic class shares the instance member's type instead.
     DenseHashMap<AstName, TypeId> classValueMethodTypes{AstName{""}};
@@ -143,7 +143,7 @@ struct ConstraintGenerator
     DenseHashMap<const AstStatDeclareExternType*, ScopePtr> astExternTypeDefiningScopes{nullptr};
     DenseHashMap<const AstStatClass*, ScopePtr> astClassDefiningScopes{nullptr};
 
-    // Luwu Classes (rfcs/classes.md): names bound by a class declaration. `checkGlobal` resolves a
+    // Luwu Classes (rfcs/classes): names bound by a class declaration. `checkGlobal` resolves a
     // class referenced past a control-flow join by its binding, and must not do that for any other
     // global: see the comment there.
     DenseHashSet<AstName> classGlobalNames{AstName{}};

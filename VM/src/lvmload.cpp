@@ -278,7 +278,7 @@ static void remapUserdataTypes(char* data, size_t size, uint8_t* userdataRemappi
     );
 }
 
-// Luwu (bytecode versioning): what a blob's header says it contains. The loader checks these, never a raw
+// Luwu bytecode versioning: what a blob's header says it contains. The loader checks these, never a raw
 // version number. A version number must not imply every feature below it, and legacy and Luwu bytecode each
 // decide their own features.
 struct BytecodeFeatures
@@ -313,7 +313,7 @@ static BytecodeFeatures getLuwuFeatures()
     return features;
 }
 
-// Luwu (bytecode versioning): what upstream Luau put in the versions it numbered after LBC_VERSION_MAX, to name them when refusing them
+// Luwu bytecode versioning: what upstream Luau put in the versions it numbered after LBC_VERSION_MAX, to name them when refusing them
 static const char* getUpstreamVersionContents(uint8_t version)
 {
     switch (version)
@@ -329,7 +329,7 @@ static const char* getUpstreamVersionContents(uint8_t version)
     }
 }
 
-// Luwu (bytecode versioning): for a proto loaded as legacy bytecode, the first opcode or builtin id in its
+// Luwu bytecode versioning: for a proto loaded as legacy bytecode, the first opcode or builtin id in its
 // code that legacy bytecode never contained, if any
 struct LegacyCodeViolation
 {
@@ -357,7 +357,7 @@ static LegacyCodeViolation findNonLegacyCode(const Proto* p)
     return {nullptr, 0};
 }
 
-// Luwu (bytecode versioning): for a proto loaded as legacy bytecode, the first type tag in its type info that
+// Luwu bytecode versioning: for a proto loaded as legacy bytecode, the first type tag in its type info that
 // legacy bytecode never contained, or -1
 static int findNonLegacyTypeTag(Proto* p)
 {
@@ -420,7 +420,7 @@ static int loadsafe(
         return 1;
     }
 
-    // Luwu (bytecode versioning): upstream reads only its own version number here; see "Luwu bytecode version history" in Bytecode.h
+    // Luwu bytecode versioning: upstream reads only its own version number here; see "Luwu bytecode version history" in Bytecode.h
     BytecodeFeatures features;
 
     if (version == LWBC_MAGIC)

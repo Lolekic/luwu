@@ -272,7 +272,7 @@ public:
         return Luau::visit(*this, mtv.table->ty);
     }
 
-    // LuwuGenericNominals: a generic class instantiation is written with its type arguments
+    // Luwu Generic Nominals (rfcs/generics-on-extern-types.md): a generic class instantiation is written with its type arguments
     // (`Box<number>`), or the annotation names the uninstantiated class. An argument can lead back
     // to the same type, so the arguments of a type whose arguments are being written are left out.
     AstType* externTypeReference(const ExternType& etv, char* name)

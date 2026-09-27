@@ -367,7 +367,7 @@ struct InfiniteTypeFinder : IterativeTypeVisitor
     const InstantiationSignature& signature;
     NotNull<Scope> scope;
     bool foundInfiniteType = false;
-    // Luwu Classes (rfcs/classes.md): the reference that makes a generic class infinite, when
+    // Luwu Classes (rfcs/classes): the reference that makes a generic class infinite, when
     // `signature.fn` is one (see isInfiniteSelfReference).
     std::optional<TypeId> infiniteSelfReference;
 
@@ -457,7 +457,7 @@ struct InfiniteTypeFinder : IterativeTypeVisitor
         return FFlag::LuwuGenericNominals && get<ExternType>(follow(signature.fn.type));
     }
 
-    // Luwu Classes (rfcs/classes.md): a class is nominal, so a reference to itself inside its own
+    // Luwu Classes (rfcs/classes): a class is nominal, so a reference to itself inside its own
     // body is only infinite when a type argument wraps one of the class's parameters (`A<{T}>`,
     // `A<A<T>>`): each instantiation then mentions a new one. `A<string>` and `Pair<B, A>` reach
     // finitely many instantiations and expand normally. Upstream rejects every self-reference with
@@ -1086,7 +1086,7 @@ bool ConstraintSolver::tryDispatch(const PackSubtypeConstraint& c, NotNull<const
     return true;
 }
 
-// Luwu Classes (rfcs/classes.md): a generic class's method as read through the class value, where
+// Luwu Classes (rfcs/classes): a generic class's method as read through the class value, where
 // nothing instantiates the class's generics, so the method is generic over them itself.
 TypeId ConstraintSolver::quantifyOverClassGenerics(TypeId methodTy, const GeneralizationConstraint& c)
 {
@@ -1546,7 +1546,7 @@ bool ConstraintSolver::tryDispatch(const TypeAliasExpansionConstraint& c, NotNul
 
     if (itf.foundInfiniteType)
     {
-        // Luwu Classes (rfcs/classes.md): upstream reports a type alias's violation from the alias
+        // Luwu Classes (rfcs/classes): upstream reports a type alias's violation from the alias
         // statement (TypeChecker2, `invalidTypeAliases`); a class has no such statement to hang it on,
         // so the solver reports the reference that causes it. The expansion that ran into it gets the
         // error type, like a use of an invalid alias.
@@ -2114,11 +2114,11 @@ bool ConstraintSolver::tryDispatch(const FunctionCallConstraint& c, NotNull<cons
     return true;
 }
 
-// LuwuGenericNominals: the option of `expectedType` that names the same generic nominal as `ftv` returns, if there
-// is exactly one. `expectedType` may be a union -- a function declared
-// `(): string | Exception<Info>` returning `Exception(...)`, say -- in which case the single option
-// naming that class is the one this call is expected to produce. More than one is ambiguous and
-// yields nothing, as does an expectation that names a different class.
+// Luwu Generic Nominals (rfcs/generics-on-extern-types.md): the option of `expectedType` that names the
+// same generic nominal as `ftv` returns, if there is exactly one. `expectedType` may be a union: for
+// example, a function declared `(): string | Exception<Info>` that returns `Exception(...)`. The single
+// option naming that class is the one this call is expected to produce. More than one such option is
+// ambiguous and yields nothing, and so does an expectation that names a different class.
 //
 // This is deliberately an identity check on the class itself (name + definition site + arity) and
 // never looks at the type arguments: matching them is the caller's business, and pairing two
@@ -2169,8 +2169,9 @@ static std::optional<TypeId> selectExpectedNominal(const FunctionType* ftv, Type
     return std::nullopt;
 }
 
-// LuwuGenericNominals: pair each still-generic type parameter of the nominal `ftv` returns with the corresponding
-// type argument of the expectation, for pushing into the call's arguments.
+// Luwu Generic Nominals (rfcs/generics-on-extern-types.md): pair each still-generic type parameter of
+// the nominal `ftv` returns with the corresponding type argument of the expectation, for pushing into
+// the call's arguments.
 static void collectNominalGenericBindings(const FunctionType* ftv, TypeId expectedType, DenseHashMap<TypeId, TypeId>& bindings)
 {
     std::optional<TypeId> expected = selectExpectedNominal(ftv, expectedType);
@@ -2255,7 +2256,7 @@ bool ConstraintSolver::tryDispatch(const FunctionCheckConstraint& c, NotNull<con
 
     Unifier2 u2{arena, builtinTypes, constraint->scope, NotNull{&iceReporter}};
 
-    // LuwuGenericNominals: a call that constructs a nominal (`Exception(...)`) against a known expected type
+    // Luwu Generic Nominals (rfcs/generics-on-extern-types.md): a call that constructs a nominal (`Exception(...)`) against a known expected type
     // (`: Exception<Info>`) can solve that nominal's generics from the expectation before its
     // arguments are checked. Without this they become `never`/`unknown` below, a table literal
     // argument has nothing to check against and widens -- `{ kind = "InvalidInput" }` infers
@@ -2310,7 +2311,7 @@ bool ConstraintSolver::tryDispatch(const FunctionCheckConstraint& c, NotNull<con
     {
         TypeId expectedArgTy = follow(expectedArgs[i + expectedArgOffset]);
 
-        // LuwuGenericNominals: a parameter whose type is one of the nominal's generics has a real expected type
+        // Luwu Generic Nominals (rfcs/generics-on-extern-types.md): a parameter whose type is one of the nominal's generics has a real expected type
         // once that generic is solved from the call's own expected type -- push that in, rather
         // than the bare generic, so a literal argument is checked against it instead of widening.
         if (TypeId* bound = nominalBindings.find(expectedArgTy))

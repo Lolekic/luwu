@@ -992,7 +992,7 @@ int lua_getmetatable(lua_State* L, int objindex)
         break;
     case LUA_TOBJECT:
     case LUA_TCLASS:
-        // Luwu Classes (rfcs/classes.md): class and object metatables are locked down and never
+        // Luwu Classes (rfcs/classes): class and object metatables are locked down and never
         // exposed, so these behave like a primitive without a metatable (such as `number`). Upstream
         // returns an object's class's instance metatable, and the global metatable of the type for a class.
         mt = NULL;
@@ -1134,7 +1134,7 @@ int lua_setmetatable(lua_State* L, int objindex)
     case LUA_TOBJECT:
     case LUA_TCLASS:
     {
-        // Luwu Classes (rfcs/classes.md): the default case would install a metatable for every value
+        // Luwu Classes (rfcs/classes): the default case would install a metatable for every value
         // of the type, which the language doesn't allow for classes and objects. Upstream takes the
         // default case for both.
         luaG_runerror(L, "cannot set the metatable of a %s", luaT_typenames[ttype(obj)]);
@@ -1709,7 +1709,7 @@ void* lua_getstringexternaluserdata(lua_State* L, int idx)
     return nullptr;
 }
 
-// Luwu Classes (rfcs/classes.md): the class a class-or-object value belongs to, or NULL for any other
+// Luwu Classes (rfcs/classes): the class a class-or-object value belongs to, or NULL for any other
 // value.
 static LuauClass* classofvalue(const TValue* o)
 {

@@ -346,7 +346,7 @@ public:
 
     void reportError(TypeErrorData&& data, const Location& location);
     void reportError(TypeError e);
-    // Luwu Classes (rfcs/classes.md): queues expansion of the pending aliases inside a generic class's
+    // Luwu Classes (rfcs/classes): queues expansion of the pending aliases inside a generic class's
     // member that instantiating the class copied and that nothing else will expand.
     //
     // Instantiating a generic class substitutes the type arguments into each member. A member can
@@ -357,10 +357,10 @@ public:
     //    inside `class A<T>`, where `type R<T> = { R<T> }` never uses `T`.
     // A member that is itself a pending expansion is not handled here; the caller defers it.
     void queuePendingMemberExpansions(TypeId memberTy, NotNull<const Constraint> constraint);
-    // Luwu Classes (rfcs/classes.md): a generic class's method as read through the class value. Nothing
+    // Luwu Classes (rfcs/classes): a generic class's method as read through the class value. Nothing
     // instantiates the class's generics there, so the method is made generic over them itself.
     TypeId quantifyOverClassGenerics(TypeId methodTy, const GeneralizationConstraint& c);
-    // Luwu Classes (rfcs/classes.md): reports a generic class's infinite reference to itself once, at
+    // Luwu Classes (rfcs/classes): reports a generic class's infinite reference to itself once, at
     // the reference inside the class.
     void reportInfiniteSelfReference(TypeId reference, TypeId classTemplate, const Location& expansionLocation);
 

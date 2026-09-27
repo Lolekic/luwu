@@ -248,9 +248,9 @@ private:
     // If classTy's `__init` is `private`, and `location` falls outside of that class's own
     // definition block, report an error.
     void checkPrivateConstructorAccess(TypeId classTy, const Location& location);
-    // Luwu Classes (rfcs/classes.md): steers `typeof(Cat)` to `class<Cat>`.
+    // Luwu Classes (rfcs/classes): steers `typeof(Cat)` to `class<Cat>`.
     void reportClassTypeofSpelling(AstTypeTypeof* ty, const std::string& className, TypeId objectTy);
-    // Luwu Classes (rfcs/classes.md): reports reading `__init` from a class or object; true if it did.
+    // Luwu Classes (rfcs/classes): reports reading `__init` from a class or object; true if it did.
     bool checkConstructorReadByName(TypeId tableTy, const std::string& prop, ValueContext context, const Location& location);
     PropertyType hasIndexTypeFromType(
         TypeId ty,

@@ -35,7 +35,7 @@ struct Variable
     // containing no write to the variable still holds whatever was true when it was entered.
     // A write from a nested function runs whenever that function is called, which no region rules out.
     //
-    // Luwu Classes (rfcs/classes.md) uses this to keep a `class.isinstance` proof alive across writes
+    // Luwu Classes (rfcs/classes) uses this to keep a `class.isinstance` proof alive across writes
     // that cannot reach it (see Compiler::matchIsinstanceProvenLocal).
     bool writtenByNestedFunction = false;
 };
@@ -44,7 +44,7 @@ struct Variable
 // every target of `a, b = ...`, `x += v`, and `function x() end`. The assigned values, and a function
 // statement's function, are visited as usual; a target is visited only if `assign` does it.
 //
-// Luwu Classes (rfcs/classes.md): trackValues and the compiler's `class.isinstance` proof regions both
+// Luwu Classes (rfcs/classes): trackValues and the compiler's `class.isinstance` proof regions both
 // ask "does this write local X", and share this one definition of a write so the two cannot disagree.
 // Upstream has these visits inline in trackValues' visitor.
 struct AssignmentVisitor : AstVisitor

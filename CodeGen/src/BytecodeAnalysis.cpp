@@ -764,7 +764,7 @@ uint8_t getRegTag(std::array<uint8_t, 256>& regTags, BytecodeTypeInfo& bcTypeInf
     return regTags[reg];
 }
 
-// Luwu Classes (rfcs/classes.md): finds registers that a `class.isinstance(x, C)` branch proves hold
+// Luwu Classes (rfcs/classes): finds registers that a `class.isinstance(x, C)` branch proves hold
 // an object. For each bytecode block, the result is the register `x` if the block is entered through
 // such a branch, or -1. Only a block whose single predecessor is that branch qualifies.
 //
@@ -1594,7 +1594,7 @@ static void analyzeBytecodeTypesPass(
                 break;
             case LOP_GETOBJECTMEMBER:
             {
-                // Luwu Classes (rfcs/classes.md): the member's type is unknown here, like GETTABLEKS's result
+                // Luwu Classes (rfcs/classes): the member's type is unknown here, like GETTABLEKS's result
                 int ra = LUAU_INSN_A(*pc);
                 int rb = LUAU_INSN_B(*pc);
 
@@ -1606,7 +1606,7 @@ static void analyzeBytecodeTypesPass(
             }
             case LOP_NEWOBJECT:
             {
-                // Luwu Classes (rfcs/classes.md): every form leaves the new object in A (the INIT form's
+                // Luwu Classes (rfcs/classes): every form leaves the new object in A (the INIT form's
                 // `__init` frame above it is consumed by the CALL that follows)
                 int ra = LUAU_INSN_A(*pc);
 

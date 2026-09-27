@@ -1382,7 +1382,7 @@ void TypeChecker2::visit(AstStatClass* stat)
 
     visitGenerics(stat->generics, stat->genericPacks);
 
-    // Luwu Classes (rfcs/classes.md): a primary constructor's parameters are checked like default
+    // Luwu Classes (rfcs/classes): a primary constructor's parameters are checked like default
     // function arguments -- annotation resolved, default checked against it.
     if (const AstClassPrimaryConstructor* primaryConstructor = stat->primaryConstructor)
     {
@@ -1455,7 +1455,7 @@ void TypeChecker2::visit(AstStatClass* stat)
 
     // A class whose fields are all private and which has no functions can be constructed, but nothing
     // can ever read or write what it holds: only the class's own functions may touch a private field,
-    // and there are none (rfcs/classes.md).
+    // and there are none (rfcs/classes).
     if (FFlag::LuwuBetterUserDefinedClasses)
     {
         size_t fieldCount = 0;
@@ -1510,7 +1510,7 @@ void TypeChecker2::visit(AstStatClass* stat)
 
     // A class with a private constructor can only be instantiated from its own body. If nothing there calls it
     // (`Name(...)` or `Name { ... }`, in a method, a closure nested in one, or a field default), no instance can
-    // ever exist (rfcs/classes.md).
+    // ever exist (rfcs/classes).
     if (FFlag::LuwuBetterUserDefinedClasses)
     {
         bool privateConstructor = stat->primaryConstructor && stat->primaryConstructor->visibility == AstClassMemberVisibility::Private;

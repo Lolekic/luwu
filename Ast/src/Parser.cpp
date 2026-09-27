@@ -48,7 +48,7 @@ namespace Luau
 namespace
 {
 
-// Luwu Classes (rfcs/classes.md): `class` is a contextual keyword, so with the classes flags off a
+// Luwu Classes (rfcs/classes): `class` is a contextual keyword, so with the classes flags off a
 // class declaration parses as a nonsense expression statement and reports something about assignments
 // (upstream: "Incomplete statement: expected assignment or a function call").
 // Users have read that as "my Luwu build is broken", so say what is actually wrong.
@@ -56,7 +56,7 @@ const char* const kClassesDisabledError =
     "Classes are currently disabled; enable the 'DebugLuauUserDefinedClasses', 'DebugLuauUserDefinedClassesRuntime' and "
     "'LuwuBetterUserDefinedClasses' fast flags to use 'class'";
 
-// Luwu Classes (rfcs/classes.md): class members may not be named after the keywords that appear in the
+// Luwu Classes (rfcs/classes): class members may not be named after the keywords that appear in the
 // class header or in front of a member. This keeps those positions unambiguous, and leaves room to give
 // these words meaning there later without breaking existing code.
 const std::unordered_set<std::string> DISALLOWED_CLASS_MEMBER_NAMES{
@@ -461,7 +461,7 @@ AstStatBlock* Parser::parseBlockNoScope()
     return allocator.alloc<AstStatBlock>(location, copy(body));
 }
 
-// Luwu Classes (rfcs/classes.md): the grammar below adds classStatement (see parseClassStat).
+// Luwu Classes (rfcs/classes): the grammar below adds classStatement (see parseClassStat).
 // stat ::=
 // varlist `=' explist |
 // functioncall |
@@ -1651,7 +1651,7 @@ const std::unordered_set<std::string> EXPLICITLY_DISALLOWED_METAMETHODS{
 
 } // namespace
 
-// Luwu Classes (rfcs/classes.md): parse the parameter list of a class's primary constructor, e.g. the
+// Luwu Classes (rfcs/classes): parse the parameter list of a class's primary constructor, e.g. the
 // `(name: string, age = 0)` of `class Cat(name: string, age = 0)`. Each parameter also declares a field
 // of the same name, public and mutable unless qualified. The list is compiled into a synthesized `__init`.
 LUAU_NOINLINE AstClassPrimaryConstructor* Parser::parseClassPrimaryConstructor(
@@ -1685,7 +1685,7 @@ LUAU_NOINLINE AstClassPrimaryConstructor* Parser::parseClassPrimaryConstructor(
         }
         else
         {
-            // Luwu Classes (rfcs/classes.md): a parameter may carry the access specifier and `const`
+            // Luwu Classes (rfcs/classes): a parameter may carry the access specifier and `const`
             // modifier of the field it declares, Kotlin-style:
             // `class SshKey private (public const public_key: string, private const private_key: string)`.
             //
@@ -1727,7 +1727,7 @@ LUAU_NOINLINE AstClassPrimaryConstructor* Parser::parseClassPrimaryConstructor(
             Binding binding = parseBinding(/* isConst= */ false, /* allowDefault= */ FFlag::LuwuDefaultArguments);
 
             // Every parameter declares a field, so the keywords banned from field names are banned here
-            // too (rfcs/classes.md).
+            // too (rfcs/classes).
             if (isDisallowedClassMemberName(binding.name.name))
                 report(binding.name.location, "Fields are not allowed to be named '%s'", binding.name.name.value);
 
@@ -1786,7 +1786,7 @@ LUAU_NOINLINE AstClassPrimaryConstructor* Parser::parseClassPrimaryConstructor(
     return primaryConstructor;
 }
 
-// Luwu Classes (rfcs/classes.md): does the current token in a class body start a statement rather than
+// Luwu Classes (rfcs/classes): does the current token in a class body start a statement rather than
 // a member? A member is `name`, `name: T`, `name = expr` or a `function`. A statement keyword, or a name
 // followed by a call, index or comma, means the class was never closed and we are now eating the code
 // that follows it.
@@ -1817,7 +1817,7 @@ bool Parser::classBodyLooksLikeStatement()
     return next == '(' || next == '.' || next == ',' || next == '[';
 }
 
-// Luwu Classes (rfcs/classes.md): the grammar is also in the RFC's "Class definition syntax" section.
+// Luwu Classes (rfcs/classes): the grammar is also in the RFC's "Class definition syntax" section.
 // classStatement ::= [`export'] `class' Name [`<' GenericTypeListWithDefaults `>'] [primaryCtor] {classMember} `end'
 // primaryCtor ::= [access] `(' [ctorParam {`,' ctorParam}] `)'
 // ctorParam ::= [access] [`const'] Name [`:' Type] [`=' exp]
@@ -1837,12 +1837,12 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
     AstArray<AstGenericTypePack*> genericPacks{};
     if (FFlag::LuwuBetterUserDefinedClasses && FFlag::LuwuGenericNominals)
     {
-        // Luwu Classes (rfcs/classes.md): a class's generic parameter list may carry defaults, like
+        // Luwu Classes (rfcs/classes): a class's generic parameter list may carry defaults, like
         // a type alias's -- `class Box<T = string>`.
         std::tie(generics, genericPacks) = parseGenericTypeList(/* withDefaultValues= */ true);
     }
 
-    // Luwu Classes (rfcs/classes.md): an optional primary constructor, which may carry an access
+    // Luwu Classes (rfcs/classes): an optional primary constructor, which may carry an access
     // specifier of its own: `class Cat(name: string)`, `class Account private (holder: User)`.
     // The `(` lookahead is what keeps `public`/`private` here from being confused with the access
     // specifier of the class's first member.
@@ -1860,7 +1860,7 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
         nextLexeme();
     }
 
-    // Luwu Classes (rfcs/classes.md): no classical inheritance. Upstream Luau spells it `class A extends B`.
+    // Luwu Classes (rfcs/classes): no classical inheritance. Upstream Luau spells it `class A extends B`.
     // Here that would parse as a class with two bare fields, `extends` and `B`, so report what's actually
     // wrong for anyone porting upstream classes. Checked both before and after a primary constructor.
     auto rejectExtends = [&]()
@@ -1880,7 +1880,7 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
         );
     };
 
-    // Luwu Classes (rfcs/classes.md): `implements` is reserved in the class header for traits. Like
+    // Luwu Classes (rfcs/classes): `implements` is reserved in the class header for traits. Like
     // `extends`, it would otherwise parse as a list of bare fields. The whole interface list is consumed
     // so it produces only one error.
     auto rejectImplements = [&]()
@@ -1930,7 +1930,7 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
             primaryConstructorParams.insert(arg->name);
     }
 
-    // Luwu Classes (rfcs/classes.md): a parameter may carry its field's access specifier and `const`
+    // Luwu Classes (rfcs/classes): a parameter may carry its field's access specifier and `const`
     // modifier directly (`class SshKey(public const public_key: string)`). Restating such a field in
     // the class body is allowed, but the restatement has to agree with the parameter, and once
     // *anything* in the class carries an access specifier, everything must.
@@ -1983,7 +1983,7 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
 
     // Members without an access specifier, collected while parsing the body. Whether they are errors
     // depends on whether any other member has a specifier, which is only known once the whole class is
-    // parsed (see the all-or-nothing check after the body, rfcs/classes.md).
+    // parsed (see the all-or-nothing check after the body, rfcs/classes).
     std::vector<std::pair<Location, bool>> unqualifiedMemberLocations; // (location, isFunction)
     std::vector<Location> explicitPublicQualifierLocations;
     // Primary constructor parameters whose field the class body restates with an explicit access
@@ -2015,7 +2015,7 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
         std::optional<Location> qualifierLocation;
         AstClassMemberVisibility visibility = AstClassMemberVisibility::Public;
 
-        // Luwu Classes (rfcs/classes.md): a class method may carry attributes, like a free function:
+        // Luwu Classes (rfcs/classes): a class method may carry attributes, like a free function:
         // `@native function update(self) end`. They can go on either side of the access specifier.
         // `@native private function` reads well when the attribute has its own line, and
         // `private @native function` when it doesn't. They can't go on both sides at once, so a reader
@@ -2037,7 +2037,7 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
         if (memberAttributesFollow())
             parseMemberAttributes();
 
-        // Luwu Classes (rfcs/classes.md): functions in a class are always const, so `const function` is rejected
+        // Luwu Classes (rfcs/classes): functions in a class are always const, so `const function` is rejected
         // rather than being read as a field -- it's valid outside a class, and easy to paste into one. The `const`
         // is dropped so the function itself still parses.
         auto rejectConstFunction = [&]()
@@ -2064,7 +2064,7 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
 
         // An access specifier only counts as one when a member follows it. `public: number` is a member
         // *named* `public`. The RFC disallows that name, and reporting it is clearer than reporting a
-        // missing field name (rfcs/classes.md).
+        // missing field name (rfcs/classes).
         auto qualifierIntroducesMember = [&]()
         {
             if (!FFlag::LuwuBetterUserDefinedClasses)
@@ -2160,7 +2160,7 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
             if (FFlag::LuwuBetterUserDefinedClasses && !qualifierLocation)
                 unqualifiedMemberLocations.push_back({propName->location, /* isFunction */ false});
 
-            // Luwu Classes (rfcs/classes.md): restating a primary constructor parameter's field in the
+            // Luwu Classes (rfcs/classes): restating a primary constructor parameter's field in the
             // body is how an *unqualified* parameter gets its access specifier. A parameter that already
             // has one can be restated, but not contradicted: with `public text` in the header and
             // `private text` in the body, a reader couldn't trust either.
@@ -2378,7 +2378,7 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
         }
     }
 
-    // Luwu Classes (rfcs/classes.md): access specifiers are all-or-nothing within a class.
+    // Luwu Classes (rfcs/classes): access specifiers are all-or-nothing within a class.
     //
     // A class with no access specifiers is entirely public. That's the POD case, which the RFC keeps
     // short on purpose. Once any member or primary constructor parameter says `public` or `private`,
@@ -2693,7 +2693,7 @@ AstStat* Parser::parseDeclaration(const Location& start, const AstArray<AstAttr*
 
         if (FFlag::LuwuGenericNominals)
         {
-            // Luwu (rfcs/generics-on-extern-types.md): An extern type's generic parameter list may carry defaults:
+            // Luwu Generic Nominals (rfcs/generics-on-extern-types.md): an extern type's generic parameter list may carry defaults:
             // `declare extern type Box<T = string> with ... end`.
             std::tie(classGenerics, classGenericPacks) = parseGenericTypeList(/* withDefaultValues= */ true);
         }
@@ -3186,7 +3186,7 @@ std::pair<AstExprFunction*, AstLocal*> Parser::parseFunctionBody(
 
     auto [self, vars, varsDefaults] = prepareFunctionArguments(start, hasself, args);
 
-    // Luwu Classes (rfcs/classes.md): a method's `self` is const, so every write to it (assignment,
+    // Luwu Classes (rfcs/classes): a method's `self` is const, so every write to it (assignment,
     // `function self()`, a write from a nested closure) is rejected like a write to any const local.
     // Field writes (`self.x = v`) and a new `local self` are unaffected.
     if (isClassFunction && vars.size > 0 && vars.data[0]->name == "self")
@@ -5910,7 +5910,7 @@ AstLocal* Parser::pushLocal(const Binding& binding)
     return local;
 }
 
-// Luwu Classes (rfcs/classes.md): bring a class's primary constructor parameters into scope for a
+// Luwu Classes (rfcs/classes): bring a class's primary constructor parameters into scope for a
 // field initializer expression, the only place they are visible. Their AstLocals were created once,
 // at the depth of the synthesized `__init`, by parseClassPrimaryConstructor; this re-enters them into
 // the scope chain, and the caller's restoreLocals takes them back out.

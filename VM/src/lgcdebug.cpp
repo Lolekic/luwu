@@ -142,7 +142,7 @@ static void validateproto(global_State* g, Proto* f)
         validateobjref(g, obj2gco(f), obj2gco(f->ownerclass));
 }
 
-// Luwu Classes (rfcs/classes.md): a class whose construction failed with LUA_ERRMEM (luaR_newclass) stays
+// Luwu Classes (rfcs/classes): a class whose construction failed with LUA_ERRMEM (luaR_newclass) stays
 // in the heap until it is swept, with any of its buffers and tables still NULL, and the heap walks below
 // visit it like any other object.
 static void validateclass(global_State* g, LuauClass* lco)

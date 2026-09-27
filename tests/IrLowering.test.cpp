@@ -8948,7 +8948,7 @@ bb_bytecode_2:
     );
 }
 
-// Luwu Classes (rfcs/classes.md): the construction and class-member fallbacks call into C, which clobbers
+// Luwu Classes (rfcs/classes): the construction and class-member fallbacks call into C, which clobbers
 // every caller-saved register, so a value live across one has to be spilled first. x64 gets that from
 // IrCallWrapperX64; a64's emitFallback is a bare call, so the lowering spills explicitly.
 static std::string lowerClassFallbackWithLiveValueA64(Luau::CodeGen::IrCmd fallback)
@@ -9008,7 +9008,7 @@ TEST_CASE("ClassFallbacksSpillLiveValuesA64")
     }
 }
 
-// Luwu Classes (rfcs/classes.md): some class lowerings contain a check that branches forward to a label inside
+// Luwu Classes (rfcs/classes): some class lowerings contain a check that branches forward to a label inside
 // their own code and rejoins the main line there. Such a lowering must reserve all of its scratch registers
 // before that branch.
 //

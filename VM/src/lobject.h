@@ -414,7 +414,7 @@ typedef struct Proto
 
     void* userdata;
 
-    // Luwu Classes (rfcs/classes.md): the class this proto belongs to, or NULL. A proto belongs to a
+    // Luwu Classes (rfcs/classes): the class this proto belongs to, or NULL. A proto belongs to a
     // class if it is one of the class's own methods (including `__init` and `__defaults`), or if it is
     // lexically nested anywhere inside one.
     //
@@ -706,7 +706,7 @@ typedef struct LuauObject
 
 } LuauObject;
 
-// Luwu Classes (rfcs/classes.md): an object's members are allocated inline, immediately after its
+// Luwu Classes (rfcs/classes): an object's members are allocated inline, immediately after its
 // header (luaR_objectsize, luaR_newobject, luaR_newobjectuninit), so `members` always equals
 // `(TValue*)(object + 1)`. Native code addresses members from the object pointer with this offset
 // instead of loading `members`; anything that ever allocates members out of line must change both.

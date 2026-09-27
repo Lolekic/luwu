@@ -1449,7 +1449,7 @@ struct ConstPropState
     std::vector<NumberedInstruction> getSlotNodeCache; // Additionally, pcpos argument might be different
     std::vector<NodeSlotState> checkSlotMatchCache;    // Additionally, fallback block argument might be different
 
-    // Luwu Classes (rfcs/classes.md): earlier TRY_OBJECT_MEMBER_ADDR instructions, for reuse. The
+    // Luwu Classes (rfcs/classes): earlier TRY_OBJECT_MEMBER_ADDR instructions, for reuse. The
     // instruction both checks the member and computes its address, so a repeat on the same object
     // (OP_A) and member name (OP_C) is replaced by the earlier result. The two may have a different
     // pcpos (OP_B) and fallback (OP_D).
@@ -2749,7 +2749,7 @@ static void constPropInInst(ConstPropState& state, IrBuilder& build, IrFunction&
     }
     case IrCmd::OBJECT_MEMBER_ADDR:
     {
-        // Luwu Classes (rfcs/classes.md): an OBJECT_MEMBER_ADDR depends only on the object and a
+        // Luwu Classes (rfcs/classes): an OBJECT_MEMBER_ADDR depends only on the object and a
         // constant offset, and carries no guard at all, so a repeat of the same pair is the same
         // address. Reusing it is what lets the value cache above forward a load or a store
         // to a later read of the same member.
@@ -2785,7 +2785,7 @@ static void constPropInInst(ConstPropState& state, IrBuilder& build, IrFunction&
         break;
     case IrCmd::TRY_CLASS_MEMBER_ADDR:
     case IrCmd::TRY_OBJECT_NAMECALL_ADDR:
-        // TODO(rfcs/classes.md): no reuse cache yet, unlike TRY_OBJECT_MEMBER_ADDR above
+        // TODO(rfcs/classes): no reuse cache yet, unlike TRY_OBJECT_MEMBER_ADDR above
         break;
     case IrCmd::ADD_INT64:
     case IrCmd::SUB_INT64:
@@ -3476,7 +3476,7 @@ static void constPropInInst(ConstPropState& state, IrBuilder& build, IrFunction&
         break;
 
     case IrCmd::CHECK_OBJECT_CLASS:
-        // TODO(rfcs/classes.md): no redundant-check elimination yet, unlike CHECK_SLOT_MATCH above
+        // TODO(rfcs/classes): no redundant-check elimination yet, unlike CHECK_SLOT_MATCH above
         break;
 
     case IrCmd::ADD_VEC:

@@ -201,7 +201,7 @@ private:
     // member, which means the class was never closed. See its definition.
     bool classBodyLooksLikeStatement();
 
-    // Luwu Classes (rfcs/classes.md): parse a class's primary constructor parameter list, e.g. the
+    // Luwu Classes (rfcs/classes): parse a class's primary constructor parameter list, e.g. the
     // `(name: string, age = 0)` of `class Cat(name: string, age = 0)`.
     AstClassPrimaryConstructor* parseClassPrimaryConstructor(const std::optional<Location>& qualifierLocation, AstClassMemberVisibility visibility);
 
@@ -252,7 +252,7 @@ private:
         // since `matchFunction.location` is also used as the real, unadjusted 'function' keyword
         // location for the resulting AstExprFunction and its CST node.
         const Lexeme* endMatchLexeme = nullptr,
-        // Luwu Classes (rfcs/classes.md): set for a class function, whose first parameter, when named
+        // Luwu Classes (rfcs/classes): set for a class function, whose first parameter, when named
         // `self`, is bound const.
         bool isClassFunction = false
     );

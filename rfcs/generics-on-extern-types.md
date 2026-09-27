@@ -1,4 +1,4 @@
-# Generic parameters on extern types
+# Generic Nominals (on extern types and classes)
 
 Status: Implemented (Flagged)
 

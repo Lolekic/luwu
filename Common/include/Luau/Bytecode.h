@@ -54,7 +54,7 @@
 // Version 11: Adds CALLFB, CMPPROTO and feedback vector description. Experimental.
 // Version 12: Adds cost function serialized for proto and prepend each proto with size in bytes. Experimental.
 //
-// Luwu (bytecode versioning): versions 3..12 are loaded as "legacy" Luau bytecode: what upstream Luau up to 0.731 emits, plus
+// Luwu bytecode versioning: versions 3..12 are loaded as "legacy" Luau bytecode: what upstream Luau up to 0.731 emits, plus
 // LBC_TYPE_SYMNONE and LBF_BUFFER_ISFROZEN, which the mluau-vendored Luau that preceded Luwu emitted under
 // these same numbers. Upstream has since assigned 13 (double-precision vector constants), 14 (FASTPCALL)
 // and 100 (work-in-progress classes); Luwu refuses those by name and never follows upstream's numbering.
@@ -455,7 +455,7 @@ enum LuauOpcode
     // B: reserved
     // C: initial value of this member. currently must be a function.
     // AUX: The name of this member as a constant string
-    // Luwu Classes (rfcs/classes.md): B is 0, C holds a Luau function and AUX names a method of A's class shape
+    // Luwu Classes (rfcs/classes): B is 0, C holds a Luau function and AUX names a method of A's class shape
     // (LBC_CONSTANT_CLASS_SHAPE). Besides the declared methods, the compiler registers the synthesized `__init`
     // of a primary constructor and the `__defaults` closure for non-constant field defaults this way. Upstream
     // encodes it the same; its class shapes differ (see LBC_CONSTANT_CLASS_SHAPE).
@@ -475,7 +475,7 @@ enum LuauOpcode
     LOP_CMPPROTO,
 
     // CHECKSELFCLASS: check that a register holds an object instance of a specific class, falling
-    // through when it does and raising when it does not. Luwu Classes (rfcs/classes.md) emit it where code
+    // through when it does and raising when it does not. Luwu Classes (rfcs/classes) emit it where code
     // after it relies on the value being an instance: a method's prologue (its own `self`), an O2 inline
     // site of a method (the receiver), and after a fused `assert(class.isinstance(x, C))` whose `assert`
     // returned. Raising here rather than through an inline `error(...)` call keeps the message out of
@@ -487,7 +487,7 @@ enum LuauOpcode
     // AUX: string constant index of the method's name, for the error message
     LOP_CHECKSELFCLASS,
 
-    // JUMPXISA: fused class.isinstance(value, class) test-and-branch (see rfcs/classes.md), emitted
+    // JUMPXISA: fused class.isinstance(value, class) test-and-branch (see rfcs/classes), emitted
     // for `class.isinstance(x, C)` used as a condition and for `assert(class.isinstance(x, C))`. Avoids
     // the builtin call and the boolean materialization. Like the builtin, it tests for an instance of
     // exactly that class.
@@ -588,13 +588,13 @@ enum LuauOpcode
 // Used in LOP_JUMPXEQK* instructions
 #define LUAU_INSN_AUX_NOT(aux) ((aux) >> 31)
 
-// Luwu Classes (rfcs/classes.md): JUMPXISA aux flags (see LOP_JUMPXISA)
+// Luwu Classes (rfcs/classes): JUMPXISA aux flags (see LOP_JUMPXISA)
 // Jump when the value is an instance of the class, rather than when it is not
 #define LBC_JUMPXISA_JUMPIFINSTANCE (1u << 31)
 // The class operand must be checked at runtime
 #define LBC_JUMPXISA_CHECKCLASS (1u << 30)
 
-// Luwu Classes (rfcs/classes.md): operand C of LOP_NEWOBJECT, how the instance is initialized (see LOP_NEWOBJECT)
+// Luwu Classes (rfcs/classes): operand C of LOP_NEWOBJECT, how the instance is initialized (see LOP_NEWOBJECT)
 #define LBC_NEWOBJECT_DEFAULT 0
 #define LBC_NEWOBJECT_INIT 1
 #define LBC_NEWOBJECT_FIELDS 2
@@ -634,7 +634,7 @@ enum LuauBytecodeTag
     LBC_CONSTANT__COUNT
 };
 
-// Luwu (bytecode versioning): the header of Luwu bytecode, which the compiler always emits (see "Luwu bytecode version history").
+// Luwu bytecode versioning: the header of Luwu bytecode, which the compiler always emits (see "Luwu bytecode version history").
 enum LuwuBytecodeTag
 {
     // First byte of a Luwu blob. Upstream versions are counted up from 1 and 0 marks a compile error.
@@ -649,13 +649,13 @@ enum LuwuBytecodeTag
     LWBC_HEADER_SIZE = 3,
 };
 
-// Luwu (bytecode versioning): the last opcode, builtin id and type tag legacy (upstream-numbered) bytecode may use; anything past
+// Luwu bytecode versioning: the last opcode, builtin id and type tag legacy (upstream-numbered) bytecode may use; anything past
 // them comes from a newer upstream Luau or from Luwu's own additions, which only Luwu bytecode carries.
 #define LBC_LEGACY_LAST_OPCODE LOP_CMPPROTO
 #define LBC_LEGACY_LAST_BUILTIN LBF_BUFFER_ISFROZEN
 #define LBC_LEGACY_LAST_TYPE LBC_TYPE_SYMNONE
 
-// Luwu Classes (rfcs/classes.md): per-member attribute bits serialized as part of
+// Luwu Classes (rfcs/classes): per-member attribute bits serialized as part of
 // LBC_CONSTANT_CLASS_SHAPE. The single source of truth for these bits; both the compiler
 // (Compiler/src/Compiler.cpp) and the VM (VM/src/lclass.h/.cpp) use these directly.
 #define LBC_CLASSMEMBER_PRIVATE (1 << 0)
@@ -678,7 +678,7 @@ enum LuwuBytecodeTag
 // here so no compiler-emitted bit can collide with it.
 #define LBC_CLASSMEMBER_INITBLOCKED (1 << 7)
 
-// Luwu Classes (rfcs/classes.md): operand B of LOP_CHECKSELFCLASS. Instead of naming a register
+// Luwu Classes (rfcs/classes): operand B of LOP_CHECKSELFCLASS. Instead of naming a register
 // holding the class, take the class from the executing closure's `Proto::ownerclass`.
 //
 // A method's prologue check uses this form. The class it validates against is a constant of the
@@ -709,7 +709,7 @@ enum LuauBytecodeType
     LBC_TYPE_BUFFER,
     LBC_TYPE_INTEGER,
     LBC_TYPE_SYMNONE,
-    // Luwu Classes (rfcs/classes.md): a class value (the factory/namespace) and an object
+    // Luwu Classes (rfcs/classes): a class value (the factory/namespace) and an object
     // (instance). Kept in the 12..14 gap below LBC_TYPE_ANY so existing values don't shift.
     LBC_TYPE_CLASS = 12,
     LBC_TYPE_OBJECT = 13,
@@ -913,7 +913,7 @@ enum LuauBuiltinFunction
 
     LBF_BUFFER_ISFROZEN,
 
-    // Luwu Classes (rfcs/classes.md): class.isinstance(value, class) -> boolean
+    // Luwu Classes (rfcs/classes): class.isinstance(value, class) -> boolean
     LBF_CLASS_ISINSTANCE,
 };
 

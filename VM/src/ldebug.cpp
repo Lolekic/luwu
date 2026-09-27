@@ -315,7 +315,7 @@ l_noret luaG_indexerror(lua_State* L, const TValue* p1, const TValue* p2)
         luaG_runerror(L, "attempt to index %s with %s", t1, t2);
 }
 
-// Luwu Classes (rfcs/classes.md): a name the value does not have. The RFC's glossary splits the two
+// Luwu Classes (rfcs/classes): a name the value does not have. The RFC's glossary splits the two
 // halves of this: objects carry *fields*, while a class's namespace holds *members* -- its static
 // functions plus the field names its objects are laid out with. Neither is a table, so neither has
 // "keys". A class also gets pointed at the object case, because reaching for a field through the
@@ -341,7 +341,7 @@ l_noret luaG_missingmembererror(lua_State* L, const TValue* p1, const TValue* p2
     luaG_runerrorL(L, "this %s does not have a field named '%s'", luaT_objtypename(L, p1), key);
 }
 
-// Luwu Classes (rfcs/classes.md): `Cat.age` where `age` is one of Cat's *fields*. The class knows the
+// Luwu Classes (rfcs/classes): `Cat.age` where `age` is one of Cat's *fields*. The class knows the
 // name perfectly well -- it lays its objects out with it -- so this deserves better than being told
 // the class has never heard of it.
 l_noret luaG_instancefieldonclasserror(lua_State* L, const TValue* p1, const TValue* p2)
@@ -397,7 +397,7 @@ l_noret luaG_blockedinitaccesserror(lua_State* L, const TString* className)
 
 static void pusherrorat(lua_State* L, CallInfo* ci, const char* msg);
 
-// Luwu Classes (rfcs/classes.md): raised by construction, which may be running in the class's C
+// Luwu Classes (rfcs/classes): raised by construction, which may be running in the class's C
 // constructor (`pcall(C)`), so the location is the Lua code constructing rather than the running frame.
 l_noret luaG_privateconstructorerror(lua_State* L, const TString* className)
 {
@@ -414,7 +414,7 @@ l_noret luaG_privateconstructorerror(lua_State* L, const TString* className)
     luaD_throw(L, LUA_ERRRUN);
 }
 
-// Luwu Classes (rfcs/classes.md): raised by CHECKSELFCLASS when `self` isn't an object of the method's class.
+// Luwu Classes (rfcs/classes): raised by CHECKSELFCLASS when `self` isn't an object of the method's class.
 // `selfCall` is true when the check was emitted at an O2 inline site for a `:` call, and only changes the message.
 //
 // An inline site fails when the receiver's annotation names the wrong class, e.g. a VecDeque passed to

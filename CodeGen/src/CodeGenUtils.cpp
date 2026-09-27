@@ -49,7 +49,7 @@ LUAU_FASTFLAG(DebugLuauUserDefinedClassesRuntime)
 #define VM_PATCH_C(pc, slot) *const_cast<Instruction*>(pc) = ((uint8_t(slot) << 24) | (0x00ffffffu & *(pc)))
 #define VM_PATCH_E(pc, slot) *const_cast<Instruction*>(pc) = ((uint32_t(slot) << 8) | (0x000000ffu & *(pc)))
 
-// Luwu Classes (rfcs/classes.md): caches a member offset in operand C, as the interpreter's
+// Luwu Classes (rfcs/classes): caches a member offset in operand C, as the interpreter's
 // VM_PATCH_MEMBER_SLOT does (see LUAR_MAX_CACHED_MEMBER_SLOT).
 static void patchCachedMemberSlot(const Instruction* pc, uint32_t offset)
 {
@@ -582,7 +582,7 @@ const Instruction* executeGETTABLEKS(lua_State* L, const Instruction* pc, StkId 
             // fall through to slow path
         }
 
-        // Luwu Classes (rfcs/classes.md): the native TRY_OBJECT_MEMBER_ADDR/TRY_CLASS_MEMBER_ADDR
+        // Luwu Classes (rfcs/classes): the native TRY_OBJECT_MEMBER_ADDR/TRY_CLASS_MEMBER_ADDR
         // fast paths bail here on a stale cached slot. Mirror the interpreter's LOP_GETTABLEKS object/
         // class handling and patch the cached slot, which the native fast paths only read: this
         // fallback is the only place native code learns it.
@@ -711,7 +711,7 @@ const Instruction* executeSETTABLEKS(lua_State* L, const Instruction* pc, StkId 
             return pc;
         }
 
-        // Luwu Classes (rfcs/classes.md): the native TRY_OBJECT_MEMBER_ADDR (write mode) fast path
+        // Luwu Classes (rfcs/classes): the native TRY_OBJECT_MEMBER_ADDR (write mode) fast path
         // bails here on a stale cached slot. Mirror the interpreter's LOP_SETTABLEKS object handling
         // and patch the cached slot, as executeGETTABLEKS does.
         if (FFlag::DebugLuauUserDefinedClassesRuntime && ttisobject(rb))
@@ -783,7 +783,7 @@ const Instruction* executeNAMECALL(lua_State* L, const Instruction* pc, StkId ba
     }
     else if (FFlag::DebugLuauUserDefinedClassesRuntime && ttisobject(rb))
     {
-        // Luwu Classes (rfcs/classes.md): the native TRY_OBJECT_NAMECALL_ADDR fast path bails here on a
+        // Luwu Classes (rfcs/classes): the native TRY_OBJECT_NAMECALL_ADDR fast path bails here on a
         // stale cached slot. Mirror the interpreter's LOP_NAMECALL object handling and patch the cached
         // slot, as executeGETTABLEKS does.
         uint8_t slot = LUAU_INSN_C(insn);
@@ -965,7 +965,7 @@ const Instruction* executeFORGPREP(lua_State* L, const Instruction* pc, StkId ba
     return pc;
 }
 
-// Luwu Classes (rfcs/classes.md): LOP_NEWOBJECT for native code. It handles the non-FIELDS forms, and
+// Luwu Classes (rfcs/classes): LOP_NEWOBJECT for native code. It handles the non-FIELDS forms, and
 // FIELDS-form guard misses. This must not be a bare exit to the interpreter. An unconditional
 // `JUMP vmExit` carries no register liveness, so the analysis would eliminate stores to registers the
 // rest of the bytecode still reads, such as a numeric for loop's limit, step or index. The interpreter
@@ -1067,7 +1067,7 @@ const Instruction* executeNEWOBJECT(lua_State* L, const Instruction* pc, StkId b
     return pc;
 }
 
-// Luwu Classes (rfcs/classes.md): the native lowering of LOP_NEWCLASSMEMBER. Like construction, this
+// Luwu Classes (rfcs/classes): the native lowering of LOP_NEWCLASSMEMBER. Like construction, this
 // runs as a C fallback rather than a bare exit to the interpreter -- see executeNEWOBJECT for why.
 // Kept in step with VM_CASE(LOP_NEWCLASSMEMBER) in lvmexecute.cpp.
 const Instruction* executeNEWCLASSMEMBER(lua_State* L, const Instruction* pc, StkId base, TValue* k)

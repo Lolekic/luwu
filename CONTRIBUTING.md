@@ -58,6 +58,26 @@ Contributions to this project are expected to follow the existing code style:
   several lines, use `if`/`else`, and give a complicated condition a named `bool`. Short ternaries that pick
   between two simple values are fine.
 
+We'd like to put `Luwu` tags above new code and comments that change functionality or document a Luwu-specific
+design decision. This means if you're implementing a feature, use these headers:
+
+- `// Luwu <Feature> (<doc path>):` when the feature has an RFC: `// Luwu Classes (rfcs/classes):` or
+  `// Luwu Function Default Arguments (rfcs/function-default-arguments.md):`.
+- `// Luwu <Description>:` when a concept needs no design doc: `// Luwu bytecode versioning:`.
+- `// Luwu:` for a one-off difference from upstream Luau that belongs to no feature.
+
+For feature headers, always use Title Case and a title that matches the RFC's title. A feature named after an API
+keeps the API's own spelling: `// Luwu table.drop (rfcs/table-drop.md):`, never `Table Drop` or `Table.Drop`.
+
+If a feature has an existing tag convention, reuse the existing tag, and never use a fast/feature flag's name as the tag.
+
+Not all comments and not all code needs such a header, but these headers make it easier for people to find where
+the most important parts of a feature's implementation exists.
+
+If you'd like your comments to be preserved (as long as possible) and not clobbered by other editors or automated tooling, use
+`// name <(optional@email)>: my comment` syntax. (example: `// deviaze: this diverges from luau b/c luwu-lsp needs a way to..`)
+These contributor-tagged comments should be separated by 1 newline (or any code) from any other comments not subject to this.
+
 Upstream Luau code in this repository keeps its own formatting; don't reformat it, since that only makes
 future merges from upstream harder.
 

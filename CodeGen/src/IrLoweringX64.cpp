@@ -50,7 +50,7 @@ IrLoweringX64::IrLoweringX64(LogBuilder* logger, AssemblyBuilderX64& build, Modu
     build.align(kFunctionAlignment, X64::AlignmentDataX64::Ud2);
 }
 
-// Luwu Classes (rfcs/classes.md): authorize private/const access to the member at `slotReg` on
+// Luwu Classes (rfcs/classes): authorize private/const access to the member at `slotReg` on
 // class `classReg` (an object's lclass, or a class object directly) without bailing to the
 // interpreter. A member with no access bits is unrestricted. A private/const member takes the fast
 // path only when `classReg == currentClosure->l.p->ownerclass`, which is exactly
@@ -2706,7 +2706,7 @@ void IrLoweringX64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
     }
     case IrCmd::OBJECT_MEMBER_ADDR:
     {
-        // Luwu Classes (rfcs/classes.md): the receiver's class is proven (see LOP_GETOBJECTMEMBER), or the
+        // Luwu Classes (rfcs/classes): the receiver's class is proven (see LOP_GETOBJECTMEMBER), or the
         // object was just allocated (NEW_OBJECT). So the member's offset is a constant, and nothing needs
         // re-checking here: not the class, and not the offset against the member count. A single lea, with
         // no load and no branch.

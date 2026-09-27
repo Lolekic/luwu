@@ -1539,7 +1539,7 @@ int pluginReadMemberOnNewThread(lua_State* L)
     return 1;
 }
 
-// Stand-ins for a native plugin exercising the rest of the C API for classes (rfcs/classes.md).
+// Stand-ins for a native plugin exercising the rest of the C API for classes (rfcs/classes).
 int pluginWriteMember(lua_State* L)
 {
     luaL_checkany(L, 1);
@@ -4672,7 +4672,7 @@ TEST_CASE("Classes")
         {
             // yielding C functions (via lua_yield with continuations) so classes.luau can verify that
             // a class method calling a yielding C function still suspends/resumes correctly, including
-            // when that method is inlined -- see rfcs/classes.md
+            // when that method is inlined -- see rfcs/classes
             lua_pushcclosurek(L, singleYield, "singleYield", 0, singleYieldContinuation);
             lua_setglobal(L, "singleYield");
 
@@ -4758,7 +4758,7 @@ TEST_CASE("ClassesNativeCodegen")
     runConformance("classes_ncg.luau");
 }
 
-// Luwu Classes (rfcs/classes.md): regressions for review fixes, one file per area. Each runs at every
+// Luwu Classes (rfcs/classes): regressions for review fixes, one file per area. Each runs at every
 // optimization level, since several of the bugs were specific to O2 inlining or to O0's lack of it.
 static void runClassesFixesConformance(const char* name)
 {
@@ -4799,7 +4799,7 @@ TEST_CASE("ClassesFixesNativeCodegen")
     runClassesFixesConformance("classes_fixes_ncg.luau");
 }
 
-// Luwu Classes (rfcs/classes.md): the C API for classes, called the way an embedder calls it: from C, with no
+// Luwu Classes (rfcs/classes): the C API for classes, called the way an embedder calls it: from C, with no
 // Lua frame anywhere on the stack. The language rules treat this case specially. Native code bypasses
 // `private`, but it is still held to `const` and to the ban on reading `__init`.
 namespace
@@ -5503,7 +5503,7 @@ Yielder_ = Yielder
     }
 }
 
-// Luwu Classes (rfcs/classes.md): differential and crash fuzzing of classes.
+// Luwu Classes (rfcs/classes): differential and crash fuzzing of classes.
 //
 // tests/classes_fuzz/run.luau generates random class programs. It runs each one through the luau CLI at every
 // optimization level, both interpreted and natively compiled, compares the results against -O0, and reports any
@@ -6355,7 +6355,7 @@ TEST_CASE("UserThreadStateChange")
     CHECK(cbState.topString == "");
 }
 
-// Luwu (bytecode versioning): rewrites a Luwu blob's header as legacy Luau bytecode version 12, whose layout Luwu bytecode shares
+// Luwu bytecode versioning: rewrites a Luwu blob's header as legacy Luau bytecode version 12, whose layout Luwu bytecode shares
 static std::string asLegacyBytecode(std::string bytecode)
 {
     REQUIRE(bytecode.size() > LWBC_HEADER_SIZE);
@@ -6471,7 +6471,7 @@ TEST_CASE("UpstreamOnlyBytecodeVersionsAreNamed")
 
 TEST_CASE("ClassesNativeMemberSlotCacheSkipsWideOffsets")
 {
-    // Luwu Classes (rfcs/classes.md): the member slot cache is GETTABLEKS's 8-bit operand C. The native
+    // Luwu Classes (rfcs/classes): the member slot cache is GETTABLEKS's 8-bit operand C. The native
     // fallback patches it for a member at offset 44, and leaves it alone for offset 300, which would
     // truncate to 44 and cache some other member.
     if (!luau_codegen_supported())
@@ -6554,7 +6554,7 @@ TEST_CASE("ClassesNativeMemberSlotCacheSkipsWideOffsets")
 
 TEST_CASE("ClassesInterpreterMemberSlotCacheSkipsWideOffsets")
 {
-    // Luwu Classes (rfcs/classes.md): the interpreter's side of ClassesNativeMemberSlotCacheSkipsWideOffsets.
+    // Luwu Classes (rfcs/classes): the interpreter's side of ClassesNativeMemberSlotCacheSkipsWideOffsets.
     // GETTABLEKS and NAMECALL cache a member at offset 44 in operand C, and leave it alone for offsets 300
     // and 301, which would truncate and cache some other member.
     ScopedFastFlag sffs[] = {

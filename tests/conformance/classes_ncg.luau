@@ -209,7 +209,7 @@ expectpass("a private constructor is not callable from outside, by any route", f
     denied(outsideHelper, "a plain local function outside the class")
 end)
 
--- A class with `const` fields blocks reading its `__init` (rfcs/classes.md). From natively compiled code
+-- A class with `const` fields blocks reading its `__init` (rfcs/classes). From natively compiled code
 -- too, and from the class's own methods, which are authorized for its private members.
 class Frozen
     public const id: number

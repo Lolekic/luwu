@@ -797,7 +797,7 @@ private:
         }
     }
 
-    // Luwu Classes (rfcs/classes.md): classes are declared at the top level and a class binding is
+    // Luwu Classes (rfcs/classes): classes are declared at the top level and a class binding is
     // const, so a `local` or `local function` with a class's name anywhere in its module (before or
     // after the class, at any depth) hides the class from the code that follows it.
     bool reportClassShadow(AstLocal* local)

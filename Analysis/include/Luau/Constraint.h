@@ -59,7 +59,7 @@ struct GeneralizationConstraint
     /// bounds or unknown. Presently used only to generalize the whole module.
     bool noGenerics = false;
 
-    // Luwu Classes (rfcs/classes.md): a generic class's instance method read through the class value
+    // Luwu Classes (rfcs/classes): a generic class's instance method read through the class value
     // (`Box.get`). Bound, once the method is generalized, to its type quantified over the class's
     // own generics too, which the class value doesn't instantiate.
     std::optional<TypeId> classValueMethodType;
@@ -326,7 +326,7 @@ struct TypeInstantiationConstraint
     std::vector<TypePackId> typePackArguments;
 };
 
-// Luwu (GenericNominals): fills in one member of a generic class instantiation (`Box<number>`) whose type
+// Luwu Generic Nominals (rfcs/generics-on-extern-types.md): fills in one member of a generic class instantiation (`Box<number>`) whose type
 // was not known yet when the instantiation was made.
 //
 // A generic class can be instantiated before its own members are solved. This always happens for a

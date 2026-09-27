@@ -1046,7 +1046,7 @@ TEST_CASE_FIXTURE(BytecodeCompilerFixture, "classes_bytecode_roundtrips")
     )");
 }
 
-// Luwu Classes (rfcs/classes.md): one construction of every NEWOBJECT form, in `fn` (function 1), after the
+// Luwu Classes (rfcs/classes): one construction of every NEWOBJECT form, in `fn` (function 1), after the
 // classes' declarations (functions 0 and 2 are the two `__init`s, 3 is the module).
 static const char* kClassConstructionSource = R"(
     class Pod

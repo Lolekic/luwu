@@ -299,7 +299,7 @@ static uint32_t getFloatBits(float value)
     return result;
 }
 
-// Luwu Classes (rfcs/classes.md): the a64 counterpart of emitClassMemberAuthX64. Authorizes
+// Luwu Classes (rfcs/classes): the a64 counterpart of emitClassMemberAuthX64. Authorizes
 // private/const access to the member at `slotReg` on `classReg`, which is an object's lclass or a
 // class object. When access is not authorized, it jumps to `mismatch`, the interpreter fallback that
 // raises the error.

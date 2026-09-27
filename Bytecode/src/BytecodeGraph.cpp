@@ -267,7 +267,7 @@ std::optional<CompTimeBcFunction> fromFunctionBytecode(std::string bytecode, std
             fn.upvalueNames[i] = readString(strings, data, offset);
     }
 
-    // Luwu (bytecode versioning): BytecodeBuilder always writes the feedback vector and the inlining cost (upstream reads each only
+    // Luwu bytecode versioning: BytecodeBuilder always writes the feedback vector and the inlining cost (upstream reads each only
     // when its flag is on)
     uint32_t feedbackvecsize = readVarInt(data, offset);
     for (uint32_t j = 0; j < feedbackvecsize; j++)

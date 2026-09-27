@@ -761,7 +761,7 @@ void BytecodeBuilder::finalize()
     uint8_t version = getVersion();
     LUAU_ASSERT((version >= LWBC_VERSION_MIN && version <= LWBC_VERSION_MAX) || version == LWBC_VERSION_WIP);
 
-    // Luwu (bytecode versioning): upstream writes its own version number here; see "Luwu bytecode version history" in Bytecode.h
+    // Luwu bytecode versioning: upstream writes its own version number here; see "Luwu bytecode version history" in Bytecode.h
     bytecode = char(LWBC_MAGIC);
     writeByte(bytecode, version);
 
@@ -790,7 +790,7 @@ void BytecodeBuilder::finalize()
 
     for (const Function& func : functions)
     {
-        // Luwu (bytecode versioning): every Luwu version has the version 12 layout, so this is unconditional (upstream: only at version 12)
+        // Luwu bytecode versioning: every Luwu version has the version 12 layout, so this is unconditional (upstream: only at version 12)
         writeVarInt(bytecode, func.data.size());
         bytecode += func.data;
     }
@@ -1006,7 +1006,7 @@ void BytecodeBuilder::writeFunction(std::string& ss, uint32_t id, uint8_t flags,
         writeByte(ss, 0);
     }
 
-    // Luwu (bytecode versioning): the feedback vector and the inlining cost are always written, since every Luwu version has the
+    // Luwu bytecode versioning: the feedback vector and the inlining cost are always written, since every Luwu version has the
     // version 12 layout (upstream writes each only when the flag that picks versions 11 and 12 is on)
     writeVarInt(ss, fbSlots.size());
     for (uint32_t pc : fbSlots)
@@ -1473,7 +1473,7 @@ std::string BytecodeBuilder::getError(const std::string& message)
 
 uint8_t BytecodeBuilder::getVersion()
 {
-    // Luwu Classes (rfcs/classes/classes.md): class bytecode is still a work-in-progress format
+    // Luwu Classes (rfcs/classes): class bytecode is still a work-in-progress format
     if (FFlag::DebugLuauUserDefinedClasses)
         return LWBC_VERSION_WIP;
 

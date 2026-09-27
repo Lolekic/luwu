@@ -1398,7 +1398,7 @@ struct Printer
             if (writeTypes)
                 visualizeClassGenerics(*c);
 
-            // Luwu Classes (rfcs/classes.md): the primary constructor's parameter list has to be
+            // Luwu Classes (rfcs/classes): the primary constructor's parameter list has to be
             // reproduced even when it is empty -- `class Counter()` and `class Counter` differ, the
             // former having no default table constructor.
             if (const AstClassPrimaryConstructor* primaryConstructor = c->primaryConstructor)
@@ -1532,7 +1532,7 @@ struct Printer
         }
     }
 
-    // Luwu Classes (rfcs/classes.md): the access specifier and `const` modifier of a class member, a
+    // Luwu Classes (rfcs/classes): the access specifier and `const` modifier of a class member, a
     // primary constructor parameter or the primary constructor itself, each written only if the source had it.
     void visualizeClassQualifiers(
         const std::optional<Location>& qualifierLocation,
@@ -1553,7 +1553,7 @@ struct Printer
         }
     }
 
-    // Luwu Classes (rfcs/classes.md): `class Box<T, U = string, V...>`. Classes carry no CST node of
+    // Luwu Classes (rfcs/classes): `class Box<T, U = string, V...>`. Classes carry no CST node of
     // their own, so the brackets and commas are written where they fall; each generic still advances to
     // its own location.
     void visualizeClassGenerics(const AstStatClass& c)

@@ -1037,7 +1037,7 @@ struct BytecodeGraphParser
 
             case LOP_NEWOBJECT:
             {
-                // Luwu Classes (rfcs/classes.md): A is only written. What else is read and written depends on the
+                // Luwu Classes (rfcs/classes): A is only written. What else is read and written depends on the
                 // form in C (see LOP_NEWOBJECT in Bytecode.h).
                 Reg base = LUAU_INSN_A(insn);
                 int form = LUAU_INSN_C(insn);

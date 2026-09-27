@@ -104,7 +104,7 @@ inline bool lowerImpl(
 
     bool outputEnabled = options.includeAssembly || options.includeIr;
 
-    // Luwu (codegen logging): upstream checks `logger` for null only here. Before each
+    // Luwu codegen logging: upstream checks `logger` for null only here. Before each
     // `logger->formatAppend` below it tests only the output flag. That relies on callers that pass a
     // null logger (CodeGenContext) never asking for IR or assembly output. Luwu also checks `logger` at
     // each of those appends, and uses `build.logAppend` when it is null.

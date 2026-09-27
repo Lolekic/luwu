@@ -535,7 +535,7 @@ LUA_API int lua_getrefpool(lua_State* L, int ref);
 #define lua_isclass(L, n) (lua_type(L, (n)) == LUA_TCLASS)
 #define lua_isobject(L, n) (lua_type(L, (n)) == LUA_TOBJECT)
 
-// Luwu Classes (rfcs/classes.md)
+// Luwu Classes (rfcs/classes)
 enum lua_MemberAccess
 {
     LUA_MEMBERMISSING = 0,
