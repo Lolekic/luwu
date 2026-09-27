@@ -660,9 +660,31 @@ static const luaL_Reg tab_funcs[] = {
     {NULL, NULL},
 };
 
+static const luaL_Reg tab_funcs_with_drop[] = {
+    {"concat", tconcat},
+    {"foreach", foreach},
+    {"foreachi", foreachi},
+    {"getn", getn},
+    {"maxn", maxn},
+    {"insert", tinsert},
+    {"remove", tremove},
+    {"sort", tsort},
+    {"pack", tpack},
+    {"unpack", tunpack},
+    {"move", tmove},
+    {"create", tcreate},
+    {"find", tfind},
+    {"drop", tdrop},
+    {"clear", tclear},
+    {"freeze", tfreeze},
+    {"isfrozen", tisfrozen},
+    {"clone", tclone},
+    {NULL, NULL},
+};
+
 int luaopen_table(lua_State* L)
 {
-    luaL_register(L, LUA_TABLIBNAME, tab_funcs);
+    luaL_register(L, LUA_TABLIBNAME, FFlag::LuwuTableDrop ? tab_funcs_with_drop : tab_funcs);
 
     if (FFlag::LuwuTableDrop)
     {

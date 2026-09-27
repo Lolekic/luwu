@@ -11,6 +11,14 @@
 /crash-*
 /default.prof*
 /fuzz-*
+/luwu
+/luwu-tests
+/luwu-analyze
+/luwu-bytecode
+/luwu-compile
+/luwu.exe
+/luwu-analyze.exe
+# upstream's binary names, left over from builds before the rename
 /luau
 /luau-tests
 /luau-analyze
@@ -22,6 +30,7 @@
 __pycache__
 .cache
 .clangd
+/rfcx/
 /copytoluwu.luau
 
 # scratch/working notes: anything *ignore.* stays out of version control
