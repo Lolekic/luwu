@@ -8817,7 +8817,7 @@ TEST_CASE_FIXTURE(LoweringFixture, "ClassInlineSiteSelfCheckKeepsBlockLinear")
     // `:` inline site's check falls through into the inlined body with no block split after it.
     CHECK_EQ(
         "\n" + getCodegenAssembly(
-                   R"(
+                   R"(--!trust
 class Cat
     public n: number = 1
 

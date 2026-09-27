@@ -819,7 +819,8 @@ local function generate(seed: number): (string, string)
         "end",
     }
 
-    local mod = { "--!nocheck", "--!optimize OPTLEVEL" }
+    -- `--!trust` only takes effect in the configs that set DebugLuwuCompilerTrustsTypeAnnotations
+    local mod = { "--!nocheck", "--!optimize OPTLEVEL", "--!trust" }
     table.move(prelude, 1, #prelude, #mod + 1, mod)
     local exports = {}
     for _, c in modClasses do
@@ -830,7 +831,7 @@ local function generate(seed: number): (string, string)
     table.insert(exports, "__shared = shared")
     table.insert(mod, "return { " .. table.concat(exports, ", ") .. " }")
 
-    local main = { "--!nocheck", "--!optimize OPTLEVEL" }
+    local main = { "--!nocheck", "--!optimize OPTLEVEL", "--!trust" }
     table.move(prelude, 1, #prelude, #main + 1, main)
     for _, line in {
         'local mod = require("./MODNAME")',

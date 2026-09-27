@@ -41,8 +41,11 @@ LUAU_FASTFLAGVARIABLE(LuauEmitCallFeedback)
 LUAU_FASTFLAG(LuwuDefaultArguments)
 LUAU_FASTFLAGVARIABLE(LuwuExportedClassIsNilWorkaround)
 
-// May the compiler act on a type annotation it cannot verify? The same question the `--!trust` directive
-// answers per file (Compiler::trustsTypeAnnotations); this flag answers it for a whole embedder.
+// May a file use the `--!trust` directive, which lets the compiler act on type annotations it cannot
+// verify (Compiler::trustsTypeAnnotations)? The flag only permits the directive; it never enables trust
+// by itself. A file is trusted only when the embedder sets this flag *and* the file says `--!trust`, so an
+// embedder can't switch the behavior on for code whose author didn't ask for it, short of prepending the
+// directive to that code's source on purpose.
 //
 // Today the flag only affects class receivers, so the rest of this comment is about them.
 //
@@ -58,9 +61,9 @@ LUAU_FASTFLAGVARIABLE(LuwuExportedClassIsNilWorkaround)
 // declared `v: Vec` -- is not proven. It compiles to an ordinary NAMECALL and cached member access, so a
 // value that does not match its annotation behaves as it does at O0/O1 instead of raising.
 //
-// On, those annotations pick the method to inline, and the inline site's CHECKSELFCLASS turns a wrong
+// Trusted, those annotations pick the method to inline, and the inline site's CHECKSELFCLASS turns a wrong
 // annotation into a runtime error rather than a wrong body. That is a real speedup on annotation-heavy
-// code, and a real behavior change. Hence a flag, and hence off by default.
+// code, and a real behavior change. Hence a per-file opt-in behind a flag that is off by default.
 LUAU_FASTFLAGVARIABLE(DebugLuwuCompilerTrustsTypeAnnotations)
 
 namespace Luau
@@ -1444,8 +1447,8 @@ struct Compiler
         return func->debugname.value ? func->debugname.value : "<anonymous>";
     }
 
-    // May this compilation act on a type annotation nothing verified? Either the file said so with
-    // `--!trust` or the embedder said so for everything it compiles.
+    // May this compilation act on a type annotation nothing verified? Only when the file says so with
+    // `--!trust` and the embedder allows that directive (DebugLuwuCompilerTrustsTypeAnnotations).
     //
     // The per-file half is a member rather than a CompileOptions field, because that struct is memcpy'd
     // from its C counterpart and the two are asserted to be the same size (lcode.cpp). That placement also
@@ -1455,7 +1458,7 @@ struct Compiler
 
     bool trustsTypeAnnotations() const
     {
-        return trustTypeAnnotations || FFlag::DebugLuwuCompilerTrustsTypeAnnotations;
+        return FFlag::DebugLuwuCompilerTrustsTypeAnnotations && trustTypeAnnotations;
     }
 
     AstStatClass* lexicalClassOf(AstExprFunction* func)
@@ -8410,7 +8413,7 @@ void compileOrThrow(BytecodeBuilder& bytecode, const ParseResult& parseResult, A
         }
 
         // `--!trust`: this file's author vouches for its type annotations, so the compiler may act on
-        // them. See Compiler::trustsTypeAnnotations.
+        // them if the embedder allows the directive. See Compiler::trustsTypeAnnotations.
         if (hc.header && hc.content == "trust")
             trustTypeAnnotations = true;
     }

@@ -11223,7 +11223,7 @@ TEST_CASE("ClassGenericAnnotationResolvesReceiverForInlining")
     // Type arguments are erased at runtime, so `Box<number>` names the same class as `Box` for resolving a
     // method call's receiver. The inlined body keeps its CHECKSELFCLASS, so a lying annotation still can't run
     // the wrong method.
-    const char* source = R"(
+    const char* source = R"(--!trust
 class Box<T>
     public value: T
 
@@ -11311,7 +11311,7 @@ TEST_CASE("ClassReceiverTrustTiersDecideSelfCheck")
     // establishes the exact class) or *trusted* (an annotation says so). Both inline; only proven ones
     // may skip the inline site's CHECKSELFCLASS. This pins the split itself -- a new resolution path
     // must not acquire elision by accident.
-    const char* source = R"(
+    const char* source = R"(--!trust
 class Vec(public x: number)
     public function get(self): number
         return self.x
@@ -11378,7 +11378,7 @@ TEST_CASE("ClassIsinstanceProvenReceiverInlinesWithoutSelfCheck")
     // Inside `if class.isinstance(p, Path)`, JUMPXISA has checked the exact class on this path and the
     // local can't have been reassigned, so the method call inlines with no CHECKSELFCLASS of its own --
     // unlike the annotation path, where the check is what makes a lying annotation safe.
-    const char* source = R"(
+    const char* source = R"(--!trust
 class Path
     public raw: string
 
@@ -11773,14 +11773,14 @@ end
         }
     }
 
-    // with the flag on, the annotation-known receivers inline too, each keeping the check that turns a
-    // wrong annotation into an error
+    // with the flag on and `--!trust` in the file, the annotation-known receivers inline too, each keeping
+    // the check that turns a wrong annotation into an error
     {
         ScopedFastFlag trustAnnotations{FFlag::DebugLuwuCompilerTrustsTypeAnnotations, true};
 
         Luau::BytecodeBuilder bcb;
         bcb.setDumpFlags(Luau::BytecodeBuilder::Dump_Code);
-        Luau::compileOrThrow(bcb, source, options);
+        Luau::compileOrThrow(bcb, "--!trust" + std::string(source), options);
 
         for (int f : {1, 2, 3})
         {
@@ -11864,8 +11864,8 @@ TEST_CASE("TrustDirectiveEnablesAnnotationTrust")
 
     // `--!trust` is the file saying its annotations are true, so the compiler may act on them. Without
     // it the receiver's class is known only from a declaration nothing verified, and the call stays a
-    // NAMECALL. The fast flag answers the same question for a whole embedder; the directive answers it
-    // for one file.
+    // NAMECALL. The fast flag only permits the directive: with the flag off, `--!trust` does nothing,
+    // and with it on, a file without the directive is still untrusted.
     const char* body = R"(
 class Vec(public x: number)
     public function get(self): number
@@ -11889,6 +11889,14 @@ end
         Luau::compileOrThrow(bcb, source, options);
         return bcb.dumpFunction(1);
     };
+
+    {
+        ScopedFastFlag disallowed{FFlag::DebugLuwuCompilerTrustsTypeAnnotations, false};
+        std::string ignored = compiled("--!trust\n" + std::string(body));
+        CHECK(ignored.find("NAMECALL") != std::string::npos);
+    }
+
+    ScopedFastFlag allowed{FFlag::DebugLuwuCompilerTrustsTypeAnnotations, true};
 
     std::string without = compiled(body);
     CHECK(without.find("NAMECALL") != std::string::npos);
@@ -12304,7 +12312,7 @@ TEST_CASE("ClassAnnotationResolutionRespectsShadowingAndDeclarationOrder")
     // scopes, and `type Node = Other` inside a function names a different class. And a trusted receiver
     // above the class's declaration keeps its call, because the inline site's check reads the class binding,
     // which may still be nil there.
-    const char* source = R"(
+    const char* source = R"(--!trust
 local function early(v: Late)
     local r = v:get()
     return r
@@ -12404,7 +12412,7 @@ TEST_CASE("ClassInliningGainsNothingFromDeclarationsOrFields")
     //   object's private fields with Dog's access.
     // - `viaField` calls `self:cb()`. That call reaches a method only when the class has a method named
     //   `cb`. Here `cb` is a field holding the POD class `Bag`, so the call is a POD construction.
-    const char* source = R"(
+    const char* source = R"(--!trust
 class Bag
     public token: string = "none"
 end
@@ -12746,7 +12754,7 @@ TEST_CASE("ClassMethodInlineSelfCheck")
     // the inlined copy of the body never runs the callee's prologue, so compileInlinedCall re-emits
     // the CHECKSELFCLASS itself. Without it, a receiver whose annotation lies about its class would
     // silently run the wrong class's body.
-    std::string source = R"(
+    std::string source = R"(--!trust
         class Point
             x: number
             function get_x(self)
@@ -14071,18 +14079,20 @@ end
 local function after(c: Cat) return c.x end
 )";
 
+    ScopedFastFlag allowTrust{FFlag::DebugLuwuCompilerTrustsTypeAnnotations, true};
+
     for (bool trusted : {false, true})
     {
-        ScopedFastFlag trust{FFlag::DebugLuwuCompilerTrustsTypeAnnotations, trusted};
+        std::string file = trusted ? "--!trust" + std::string(source) : std::string(source);
 
         for (int optimizationLevel = 1; optimizationLevel <= 2; ++optimizationLevel)
         {
-            CHECK_EQ(compileTypesWithoutRanges(source, 0, optimizationLevel), R"(
+            CHECK_EQ(compileTypesWithoutRanges(file.c_str(), 0, optimizationLevel), R"(
 R0: object [argument]
 )");
 
             CHECK_EQ(
-                compileTypesWithoutRanges(source, 1, optimizationLevel),
+                compileTypesWithoutRanges(file.c_str(), 1, optimizationLevel),
                 std::string(R"(
 U0: class
 U1: class
@@ -14095,7 +14105,7 @@ R4: any
 )"
             );
 
-            CHECK_EQ(compileTypesWithoutRanges(source, 6, optimizationLevel), R"(
+            CHECK_EQ(compileTypesWithoutRanges(file.c_str(), 6, optimizationLevel), R"(
 R0: object [argument]
 )");
         }

@@ -1,13 +1,18 @@
 # Classes
 
+Status: Implemented (Flagged)
+
 FFlags:
 
 - LuwuBetterUserDefinedClasses
 - DebugLuauUserDefinedClasses
 - DebugLuauUserDefinedClassesRuntime
 - LuwuGenericNominals (classes with generic parameters share the same type system mechanisms as extern types)
+
+Optional FFlags:
+
 - LuwuDefaultArguments (default values of primary constructor parameters)
-- DebugLuwuCompilerTrustsTypeAnnotations (or `--!trust` directive in code: enables compiler inlining of class methods based on type annotations being correct)
+- DebugLuwuCompilerTrustsTypeAnnotations (allows `--!trust` to trust type annotations for inlining class methods)
 
 ## Summary
 

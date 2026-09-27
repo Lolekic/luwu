@@ -4724,7 +4724,8 @@ TEST_CASE("ClassesInlining")
     copts.optimizationLevel = 2;
 
     // The trusted receiver tier (a declared parameter, local or field type) only inlines when the compiler may act
-    // on annotations, which is off by default: run the file both ways. It reads the setting from `trustsAnnotations`.
+    // on annotations. The file says `--!trust`, which only counts when the flag allows it: run it both ways. The file
+    // reads the setting from `trustsAnnotations`.
     for (bool trust : {false, true})
     {
         CAPTURE(trust);

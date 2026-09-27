@@ -8,6 +8,7 @@
 #include "doctest.h"
 
 LUAU_FASTFLAG(DebugLuauForceOldSolver)
+LUAU_FASTFLAG(DebugLuwuCompilerTrustsTypeAnnotations)
 LUAU_FASTFLAG(DebugLuauUserDefinedClasses)
 LUAU_FASTFLAG(LuauDeprecatedAttributeOnAnonymousFunctions)
 LUAU_FASTFLAG(LuauFunctionUnusedRecursiveLinting)
@@ -2514,6 +2515,8 @@ _ = (math.random() < 0.5 and false) or 42 -- currently ignored
 
 TEST_CASE_FIXTURE(Fixture, "WrongComment")
 {
+    ScopedFastFlag allowTrust{FFlag::DebugLuwuCompilerTrustsTypeAnnotations, true};
+
     LintResult result = lint(R"(
 --!strict
 --!struct
@@ -2540,6 +2543,20 @@ do end
     // `--!trust` on its own is a known directive and warns about nothing
     CHECK_EQ(result.warnings[6].text, "trust directive has extra symbols at the end of the line");
     CHECK_EQ(result.warnings[7].text, "Comment directive is ignored because it is placed after the first non-comment token");
+}
+
+TEST_CASE_FIXTURE(Fixture, "TrustDirectiveWithoutTheFlag")
+{
+    // The flag only permits `--!trust`, so without it the directive does nothing, and says so.
+    ScopedFastFlag disallowTrust{FFlag::DebugLuwuCompilerTrustsTypeAnnotations, false};
+
+    LintResult result = lint(R"(
+--!trust
+do end
+)");
+
+    REQUIRE(1 == result.warnings.size());
+    CHECK_EQ(result.warnings[0].text, "trust directive has no effect because DebugLuwuCompilerTrustsTypeAnnotations is disabled");
 }
 
 TEST_CASE_FIXTURE(Fixture, "WrongCommentMuteSelf")

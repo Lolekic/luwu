@@ -1,4 +1,5 @@
 --!nocheck
+--!trust
 -- Luwu Classes (rfcs/classes): method inlining must never relocate a private access into a
 -- closure that does not own it.
 --
@@ -15,11 +16,12 @@
 --
 -- MUST BE RUN AT -O2. At O1 the inliner never runs and every case here passes vacuously.
 --
--- Runs twice, with DebugLuwuCompilerTrustsTypeAnnotations on and off (the `trustsAnnotations` global).
--- Off, a receiver known only from a declared type (cases 7-11, 13 and the trusted half of 16) compiles to an
--- ordinary NAMECALL, so those cases check that the call behaves as written. The only expectations that
--- differ are the lying annotations (8 and 16): on, the inline site's CHECKSELFCLASS rejects the impostor;
--- off, the call dispatches to whatever the object's own class has, as it would at O0.
+-- Runs twice, with DebugLuwuCompilerTrustsTypeAnnotations on and off (the `trustsAnnotations` global). The
+-- flag only permits the `--!trust` directive above, so with it off this file is untrusted despite it.
+-- Untrusted, a receiver known only from a declared type (cases 7-11, 13 and the trusted half of 16) compiles
+-- to an ordinary NAMECALL, so those cases check that the call behaves as written. The only expectations that
+-- differ are the lying annotations (8 and 16): trusted, the inline site's CHECKSELFCLASS rejects the impostor;
+-- untrusted, the call dispatches to whatever the object's own class has, as it would at O0.
 local trustsAnnotations: boolean = trustsAnnotations
 assert(type(trustsAnnotations) == "boolean", "run through ClassesInlining, which sets trustsAnnotations")
 

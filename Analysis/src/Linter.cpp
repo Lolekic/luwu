@@ -15,6 +15,7 @@
 
 LUAU_FASTINTVARIABLE(LuauSuggestionDistance, 4)
 LUAU_FASTFLAGVARIABLE(LuauFunctionUnusedRecursiveLinting)
+LUAU_FASTFLAG(DebugLuwuCompilerTrustsTypeAnnotations)
 LUAU_FASTFLAGVARIABLE(LuwuTableRemoveFootgunLint)
 
 namespace Luau
@@ -3642,9 +3643,18 @@ static void lintComments(LintContext& context, const std::vector<HotComment>& ho
             }
             else if (first == "trust")
             {
+                // Luwu Classes (rfcs/classes): the directive only counts when the embedder allows it (see
+                // DebugLuwuCompilerTrustsTypeAnnotations in Compiler.cpp).
                 if (space != std::string::npos)
                     emitWarning(
                         context, LintWarning::Code_CommentDirective, hc.location, "trust directive has extra symbols at the end of the line"
+                    );
+                else if (!FFlag::DebugLuwuCompilerTrustsTypeAnnotations)
+                    emitWarning(
+                        context,
+                        LintWarning::Code_CommentDirective,
+                        hc.location,
+                        "trust directive has no effect because DebugLuwuCompilerTrustsTypeAnnotations is disabled"
                     );
             }
             else

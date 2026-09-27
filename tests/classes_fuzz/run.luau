@@ -40,8 +40,9 @@ const FLAGS = "--fflags="
         "LuwuDefaultArguments=true",
         "LuwuNonePrimitive=true",
     }, ",")
--- Acting on a receiver's declared type is opt-in (see Compiler.cpp). It only changes O2, where inlining
--- runs, so it is a variant of the O2 configs rather than a second copy of the whole matrix.
+-- Acting on a receiver's declared type is opt-in (see Compiler.cpp): every generated file says `--!trust`,
+-- and this flag decides whether that directive counts. It only changes O2, where inlining runs, so it is a
+-- variant of the O2 configs rather than a second copy of the whole matrix.
 const TRUST_ANNOTATIONS_FLAG = ",DebugLuwuCompilerTrustsTypeAnnotations=true"
 const RUN_TIMEOUT_SECONDS = 60
 const OUTPUT_TAIL_BYTES = 800
