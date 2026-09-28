@@ -226,8 +226,25 @@ struct CliFileResolver : Luau::FileResolver
     {
         if (name == "-")
             return "stdin";
+        // modules are named by absolute path (see `moduleNameForPath`); show them the way they'd be typed
+        if (cwd && name.size() > cwd->size() + 1 && name.compare(0, cwd->size(), *cwd) == 0 && name[cwd->size()] == '/')
+            return name.substr(cwd->size() + 1);
         return name;
     }
+
+    // Luwu: a module is named by its absolute path, which is what `resolveModule` gets from the require
+    // navigator. A file passed on the command line has to be named the same way, or a file that is both
+    // passed and required is checked (and reported) twice, once under each spelling.
+    std::string moduleNameForPath(const std::string& path) const
+    {
+        if (path == "-")
+            return path;
+        if (!cwd || isAbsolutePath(path))
+            return normalizePath(path);
+        return normalizePath(*cwd + "/" + path);
+    }
+
+    std::optional<std::string> cwd = getCurrentWorkingDirectory();
 };
 
 struct CliConfigResolver : Luau::ConfigResolver
@@ -526,7 +543,7 @@ int main(int argc, char** argv)
     std::vector<std::string> files = getSourceFiles(argc, argv);
 
     for (const std::string& path : files)
-        frontend.queueModuleCheck(path);
+        frontend.queueModuleCheck(fileResolver.moduleNameForPath(path));
 
     std::vector<Luau::ModuleName> checkedModules;
 
