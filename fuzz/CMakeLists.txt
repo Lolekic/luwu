@@ -1,4 +1,4 @@
-# This file is part of the Luau programming language and is licensed under MIT License; see LICENSE.txt for details
+# This file is part of the Luwu programming language and is licensed under MIT License; see LICENSE.txt for details
 if(${CMAKE_VERSION} VERSION_LESS "3.26")
     message(WARNING "Building the Luau fuzzer requires CMake version 3.26 or higher.")
     return()
