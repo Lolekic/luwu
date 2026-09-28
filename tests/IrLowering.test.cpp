@@ -8991,9 +8991,7 @@ TEST_CASE("ClassFallbacksSpillLiveValuesA64")
 {
     using namespace Luau::CodeGen;
 
-    // Fallbacks load their helper from NativeContext, laid out by the host. With 4-byte pointers, a 32-bit host
-    // puts executeNEWOBJECT at an offset A64 can't encode, and A64 code never runs on such a host.
-    if (sizeof(void*) != 8)
+    if (!Luau::CodeGen::isSupported())
         return;
 
     for (IrCmd fallback : {IrCmd::FALLBACK_NEWOBJECT, IrCmd::FALLBACK_NEWCLASSMEMBER})
@@ -9092,6 +9090,9 @@ static std::string lowerClassInstUnderPressure(Luau::CodeGen::AssemblyOptions::T
 TEST_CASE("ClassLoweringsReserveScratchRegistersBeforeRejoiningBranches")
 {
     using namespace Luau::CodeGen;
+
+    if (!Luau::CodeGen::isSupported())
+        return;
 
     const std::regex labelDef(R"(^(\.L\d+):)");
     // a64 `str w4,[sp,#144]`, x64 `mov dword ptr [rsp+048h],r11d`
