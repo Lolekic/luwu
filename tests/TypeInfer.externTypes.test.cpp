@@ -1,4 +1,4 @@
-// This file is part of the Luau programming language and is licensed under MIT License; see LICENSE.txt for details
+// This file is part of the Luwu programming language and is licensed under MIT License; see LICENSE.txt for details
 #include "Luau/BuiltinDefinitions.h"
 #include "Luau/Common.h"
 #include "Luau/Error.h"
@@ -29,7 +29,7 @@ LUAU_FASTFLAG(LuauAllowIntersectionOfOneTableWithExtern)
 
 TEST_SUITE_BEGIN("TypeInferExternTypes");
 
-TEST_CASE_FIXTURE(ExternTypeFixture, "Luau.Analyze.CLI_crashes_on_this_test")
+TEST_CASE_FIXTURE(ExternTypeFixture, "Luwu.Analyze.CLI_crashes_on_this_test")
 {
     CheckResult result = check(R"(
         local CircularQueue = {}

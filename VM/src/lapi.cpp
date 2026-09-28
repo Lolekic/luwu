@@ -1,4 +1,4 @@
-// This file is part of the Luau programming language and is licensed under MIT License; see LICENSE.txt for details
+// This file is part of the Luwu programming language and is licensed under MIT License; see LICENSE.txt for details
 // This code is based on Lua 5.x implementation licensed under MIT License; see lua_LICENSE.txt for details
 #include "lapi.h"
 
@@ -58,6 +58,9 @@ const char* lua_ident = "$Lua: Lua 5.1.4 Copyright (C) 1994-2008 Lua.org, PUC-Ri
 
 const char* luau_ident = "$Luau: Copyright (C) 2019-2024 Roblox Corporation $\n"
                          "$URL: luau.org $\n";
+
+const char* luwu_ident = "$Luwu: Copyright (C) 2026 Luwu contributors $\n"
+                         "$URL: luwu.org $\n";
 
 #define api_checknelems(L, n) api_check(L, (n) <= (L->top - L->base))
 

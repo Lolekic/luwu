@@ -103,7 +103,7 @@ Any new Python code in this repo should use the Black formatter, but we should t
 
 All pull requests will run through a continuous integration pipeline using GitHub Actions that will run the built-in unit tests and integration tests on Windows, macOS and Linux.
 
-You can run the tests yourself using `cargo test`, `make test` or using `cmake` to build `Luau.UnitTest` and `Luau.Conformance` and run them.
+You can run the tests yourself using `cargo test`, `make test` or using `cmake` to build `Luwu.UnitTest` and `Luwu.Conformance` and run them.
 
 When making code changes please try to make sure they are covered by an existing test or add a new test accordingly.
 

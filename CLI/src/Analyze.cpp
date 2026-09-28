@@ -1,4 +1,4 @@
-// This file is part of the Luau programming language and is licensed under MIT License; see LICENSE.txt for details
+// This file is part of the Luwu programming language and is licensed under MIT License; see LICENSE.txt for details
 #include "Luau/BuiltinDefinitions.h"
 #include "Luau/Config.h"
 #include "Luau/Frontend.h"
@@ -141,8 +141,9 @@ static void displayHelp(const char* argv0)
     printf("  --formatter=gnu: report analysis errors in GNU-compatible format\n");
     printf("  --mode=nonstrict: default to nonstrict mode when typechecking (Luwu defaults to strict)\n");
     printf("  --mode=strict: default to strict mode when typechecking (the default)\n");
-    printf("  --solver={new|old}: selects which typechecker to use (defaults to the new solver)");
+    printf("  --solver={new|old}: selects which typechecker to use (defaults to the new solver)\n");
     printf("  --timetrace: record compiler time tracing information into trace.json\n");
+    printf("  --defs=<path>: load a definition file (`declare` globals) before checking; can be repeated\n");
 }
 
 static int assertionHandler(const char* expr, const char* file, int line, const char* function)
@@ -225,8 +226,25 @@ struct CliFileResolver : Luau::FileResolver
     {
         if (name == "-")
             return "stdin";
+        // modules are named by absolute path (see `moduleNameForPath`); show them the way they'd be typed
+        if (cwd && name.size() > cwd->size() + 1 && name.compare(0, cwd->size(), *cwd) == 0 && name[cwd->size()] == '/')
+            return name.substr(cwd->size() + 1);
         return name;
     }
+
+    // Luwu: a module is named by its absolute path, which is what `resolveModule` gets from the require
+    // navigator. A file passed on the command line has to be named the same way, or a file that is both
+    // passed and required is checked (and reported) twice, once under each spelling.
+    std::string moduleNameForPath(const std::string& path) const
+    {
+        if (path == "-")
+            return path;
+        if (!cwd || isAbsolutePath(path))
+            return normalizePath(path);
+        return normalizePath(*cwd + "/" + path);
+    }
+
+    std::optional<std::string> cwd = getCurrentWorkingDirectory();
 };
 
 struct CliConfigResolver : Luau::ConfigResolver
@@ -411,6 +429,7 @@ int main(int argc, char** argv)
     int threadCount = 0;
     std::string basePath = "";
     Luau::SolverMode solverMode = Luau::SolverMode::New;
+    std::vector<std::string> definitionFiles;
 
     for (int i = 1; i < argc; ++i)
     {
@@ -437,6 +456,8 @@ int main(int argc, char** argv)
             basePath = std::string{argv[i] + 10};
         else if (strcmp(argv[i], "--solver=old") == 0)
             solverMode = Luau::SolverMode::Old;
+        else if (strncmp(argv[i], "--defs=", 7) == 0)
+            definitionFiles.emplace_back(argv[i] + 7);
     }
 
 #if !defined(LUAU_ENABLE_TIME_TRACE)
@@ -476,6 +497,43 @@ int main(int argc, char** argv)
     }
 
     Luau::registerBuiltinGlobals(frontend, frontend.globals);
+
+    // Luwu: an embedder's globals (seal, lune, Roblox) come from a definition file, which only the
+    // language server could load before.
+    for (const std::string& path : definitionFiles)
+    {
+        std::optional<std::string> source = readFile(path);
+        if (!source)
+        {
+            fprintf(stderr, "Error opening definition file %s\n", path.c_str());
+            return 1;
+        }
+
+        Luau::LoadDefinitionFileResult result = frontend.loadDefinitionFile(
+            frontend.globals, frontend.globals.globalScope, *source, "@" + path, /* captureComments */ false
+        );
+        if (!result.success)
+        {
+            for (const Luau::ParseError& error : result.parseResult.errors)
+                report(format, path.c_str(), error.getLocation(), "SyntaxError", error.getMessage().c_str());
+
+            if (result.module)
+            {
+                for (const Luau::TypeError& error : result.module->errors)
+                    report(
+                        format,
+                        path.c_str(),
+                        error.location,
+                        "TypeError",
+                        Luau::toString(error, Luau::TypeErrorToStringOptions{frontend.fileResolver}).c_str()
+                    );
+            }
+
+            fprintf(stderr, "Failed to load definition file %s\n", path.c_str());
+            return 1;
+        }
+    }
+
     Luau::freeze(frontend.globals.globalTypes);
 
 #ifdef CALLGRIND
@@ -485,7 +543,7 @@ int main(int argc, char** argv)
     std::vector<std::string> files = getSourceFiles(argc, argv);
 
     for (const std::string& path : files)
-        frontend.queueModuleCheck(path);
+        frontend.queueModuleCheck(fileResolver.moduleNameForPath(path));
 
     std::vector<Luau::ModuleName> checkedModules;
 
