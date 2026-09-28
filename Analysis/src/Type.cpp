@@ -862,6 +862,7 @@ BuiltinTypes::BuiltinTypes()
     , externType(arena->addType(Type{ExternType{"userdata", {}, std::nullopt, std::nullopt, {}, {}, {}, {}}, /*persistent*/ true}))
     , objectType(arena->addType(Type{ExternType{"object", {}, std::nullopt, std::nullopt, {}, {}, {}, {}}, /*persistent*/ true}))
     , classType(arena->addType(Type{ExternType{"class", {}, std::nullopt, std::nullopt, {}, {}, {}, {}}, /*persistent*/ true}))
+    , vectorType(arena->addType(Type{ExternType{"vector", {}, std::nullopt, std::nullopt, {}, {}, {}, {}}, /*persistent*/ true}))
     , tableType(arena->addType(Type{PrimitiveType{PrimitiveType::Table}, /*persistent*/ true}))
     , emptyTableType(arena->addType(Type{TableType{TableState::Sealed, TypeLevel{}, nullptr}, /*persistent*/ true}))
     , trueType(arena->addType(Type{SingletonType{BooleanSingleton{true}}, /*persistent*/ true}))
@@ -906,6 +907,75 @@ TypeId BuiltinTypes::errorRecoveryType(TypeId guess) const
 TypePackId BuiltinTypes::errorRecoveryTypePack(TypePackId guess) const
 {
     return guess;
+}
+
+std::array<TypeId, 4> BuiltinTypes::nominalRoots() const
+{
+    return {externType, classType, objectType, vectorType};
+}
+
+// A nominal type's root is its parent's root (or the parent itself, if the
+// parent is a root). A parentless type is its own root, represented as nullopt.
+static std::optional<TypeId> deriveNominalRoot(std::optional<TypeId> parent)
+{
+    if (!parent)
+        return std::nullopt;
+
+    // Every constructor that passes a parent has already checked it is an extern type (a superclass
+    // that isn't one is reported and never reaches here), and nothing re-derives `root` if `parent`
+    // is set later.
+    const ExternType* parentEtv = get<ExternType>(follow(*parent));
+    LUAU_ASSERT(parentEtv);
+    if (parentEtv)
+        return parentEtv->root.value_or(*parent);
+
+    return std::nullopt;
+}
+
+ExternType::ExternType(
+    Name name,
+    Props props,
+    std::optional<TypeId> parent,
+    std::optional<TypeId> metatable,
+    Tags tags,
+    std::shared_ptr<ClassUserData> userData,
+    ModuleName definitionModuleName,
+    std::optional<Location> definitionLocation
+)
+    : name(std::move(name))
+    , props(std::move(props))
+    , parent(parent)
+    , root(deriveNominalRoot(parent))
+    , metatable(metatable)
+    , tags(std::move(tags))
+    , userData(std::move(userData))
+    , definitionModuleName(std::move(definitionModuleName))
+    , definitionLocation(definitionLocation)
+{
+}
+
+ExternType::ExternType(
+    Name name,
+    Props props,
+    std::optional<TypeId> parent,
+    std::optional<TypeId> metatable,
+    Tags tags,
+    std::shared_ptr<ClassUserData> userData,
+    ModuleName definitionModuleName,
+    std::optional<Location> definitionLocation,
+    std::optional<TableIndexer> indexer
+)
+    : name(std::move(name))
+    , props(std::move(props))
+    , parent(parent)
+    , root(deriveNominalRoot(parent))
+    , metatable(metatable)
+    , tags(std::move(tags))
+    , userData(std::move(userData))
+    , definitionModuleName(std::move(definitionModuleName))
+    , definitionLocation(definitionLocation)
+    , indexer(indexer)
+{
 }
 
 void persist(TypeId ty)
@@ -1103,6 +1173,13 @@ static bool isSameGenericNominalInstantiation(const ExternType* a, const ExternT
     if (a->name != b->name || a->definitionModuleName != b->definitionModuleName || a->definitionLocation != b->definitionLocation)
         return false;
 
+    // A class declaration produces two extern types -- the class value and its object type -- from
+    // the same AstStatClass, so they share name, module and location. `root` is what tells them
+    // apart (`class` vs `object`); without this, `local c: class<Cat> = someCat` and
+    // `local o: Cat = Cat` both typecheck.
+    if (a->root != b->root)
+        return false;
+
     if (a->instantiatedTypeParams.size() != b->instantiatedTypeParams.size())
         return false;
 
@@ -1133,6 +1210,11 @@ static bool isSameGenericNominalInstantiation(const ExternType* a, const ExternT
 static bool isBareGenericNominalRoot(const ExternType* cls, const ExternType* parent)
 {
     if (cls->name != parent->name || cls->definitionModuleName != parent->definitionModuleName || cls->definitionLocation != parent->definitionLocation)
+        return false;
+
+    // See isSameGenericNominalInstantiation: the class value and its object type are otherwise
+    // indistinguishable here.
+    if (cls->root != parent->root)
         return false;
 
     for (TypeId param : parent->instantiatedTypeParams)

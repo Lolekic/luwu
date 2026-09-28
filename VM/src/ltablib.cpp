@@ -686,6 +686,12 @@ int luaopen_table(lua_State* L)
 {
     luaL_register(L, LUA_TABLIBNAME, FFlag::LuwuTableDrop ? tab_funcs_with_drop : tab_funcs);
 
+    if (FFlag::LuwuTableDrop)
+    {
+        lua_pushcfunction(L, tdrop, "drop");
+        lua_setfield(L, -2, "drop");
+    }
+
     // Lua 5.1 compat
     lua_pushcfunction(L, tunpack, "unpack");
     lua_setglobal(L, "unpack");

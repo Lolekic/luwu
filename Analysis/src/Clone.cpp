@@ -359,7 +359,7 @@ private:
             t->indexer->indexResultType = shallowClone(t->indexer->indexResultType);
         }
 
-        if (FFlag::DebugLuauUserDefinedClasses && t->relation)
+        if (FFlag::LuwuClasses && t->relation)
         {
             Luau::visit(
                 overloaded{

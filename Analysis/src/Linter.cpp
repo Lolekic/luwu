@@ -15,6 +15,7 @@
 
 LUAU_FASTINTVARIABLE(LuauSuggestionDistance, 4)
 LUAU_FASTFLAGVARIABLE(LuauFunctionUnusedRecursiveLinting)
+LUAU_FASTFLAG(DebugLuwuCompilerTrustsTypeAnnotations)
 LUAU_FASTFLAGVARIABLE(LuwuTableRemoveFootgunLint)
 
 namespace Luau
@@ -614,6 +615,41 @@ private:
 
         return true;
     }
+
+    bool visit(AstStatClass* node) override
+    {
+        for (size_t i = 1; i < node->members.size; ++i)
+        {
+            Location last = Luau::visit([](auto&& member) -> Location
+                { return member.nameLocation; }, node->members.data[i - 1]);
+            Location location = Luau::visit([](auto&& member) -> Location
+                { return member.nameLocation; }, node->members.data[i]);
+
+            if (location.begin.line != last.end.line)
+                continue;
+
+            if (location.begin.line == lastLine)
+                continue;
+
+            bool lastHasSemicolon =
+                Luau::visit([](auto&& member) -> bool
+                    { return member.hasSemicolon; }, node->members.data[i - 1]);
+
+            if (lastHasSemicolon)
+                continue;
+
+            emitWarning(
+                *context,
+                LintWarning::Code_SameLineStatement,
+                location,
+                "Each class field should be on its own line; separate fields with a semicolon to silence"
+            );
+
+            lastLine = location.begin.line;
+        }
+
+        return true;
+    }
 };
 
 class LintMultiLineStatement : AstVisitor
@@ -736,11 +772,13 @@ private:
     DenseHashMap<AstLocal*, Local> locals;
     DenseHashMap<AstName, AstLocal*> imports;
     DenseHashMap<AstName, Global> globals;
+    DenseHashMap<AstName, AstStatClass*> classes;
 
     LintLocalHygiene()
         : locals(NULL)
         , imports(AstName())
         , globals(AstName())
+        , classes(AstName())
     {
     }
 
@@ -748,11 +786,37 @@ private:
     {
         for (auto& l : locals)
         {
+            bool shadowsClass = l.second.defined && reportClassShadow(l.first);
+
             if (l.second.used)
-                reportUsedLocal(l.first, l.second);
+            {
+                if (!shadowsClass)
+                    reportUsedLocal(l.first, l.second);
+            }
             else if (l.second.defined)
                 reportUnusedLocal(l.first, l.second);
         }
+    }
+
+    // Luwu Classes (rfcs/classes): classes are declared at the top level and a class binding is
+    // const, so a `local` or `local function` with a class's name anywhere in its module (before or
+    // after the class, at any depth) hides the class from the code that follows it.
+    bool reportClassShadow(AstLocal* local)
+    {
+        AstStatClass** cls = classes.find(local->name);
+        if (!cls)
+            return false;
+
+        emitWarning(
+            *context,
+            LintWarning::Code_LocalShadow,
+            local->location,
+            "Variable '%s' shadows class '%s' declared at line %d",
+            local->name.value,
+            (*cls)->name->name.value,
+            (*cls)->name->location.begin.line + 1
+        );
+        return true;
     }
 
     void reportUsedLocal(AstLocal* local, const Local& info)
@@ -894,6 +958,12 @@ private:
         l.defined = node;
         l.function.emplace(node->location);
 
+        return true;
+    }
+
+    bool visit(AstStatClass* node) override
+    {
+        classes[node->name->name] = node;
         return true;
     }
 
@@ -3571,6 +3641,22 @@ static void lintComments(LintContext& context, const std::vector<HotComment>& ho
                         context, LintWarning::Code_CommentDirective, hc.location, "native directive has extra symbols at the end of the line"
                     );
             }
+            else if (first == "trust")
+            {
+                // Luwu Classes (rfcs/classes): the directive only counts when the embedder allows it (see
+                // DebugLuwuCompilerTrustsTypeAnnotations in Compiler.cpp).
+                if (space != std::string::npos)
+                    emitWarning(
+                        context, LintWarning::Code_CommentDirective, hc.location, "trust directive has extra symbols at the end of the line"
+                    );
+                else if (!FFlag::DebugLuwuCompilerTrustsTypeAnnotations)
+                    emitWarning(
+                        context,
+                        LintWarning::Code_CommentDirective,
+                        hc.location,
+                        "trust directive has no effect because DebugLuwuCompilerTrustsTypeAnnotations is disabled"
+                    );
+            }
             else
             {
                 static const char* kHotComments[] = {
@@ -3580,6 +3666,7 @@ static void lintComments(LintContext& context, const std::vector<HotComment>& ho
                     "strict",
                     "optimize",
                     "native",
+                    "trust",
                 };
 
                 if (const char* suggestion = fuzzyMatch(first, kHotComments, std::size(kHotComments)))

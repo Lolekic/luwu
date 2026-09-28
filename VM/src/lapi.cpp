@@ -16,6 +16,7 @@
 #include "lnumutils.h"
 #include "lbuffer.h"
 #include "lvector.h"
+#include "lclass.h"
 
 #include <string.h>
 
@@ -990,7 +991,11 @@ int lua_getmetatable(lua_State* L, int objindex)
         mt = uvalue(obj)->metatable;
         break;
     case LUA_TOBJECT:
-        mt = objectvalue(obj)->lclass->instancemetatable;
+    case LUA_TCLASS:
+        // Luwu Classes (rfcs/classes): class and object metatables are locked down and never
+        // exposed, so these behave like a primitive without a metatable (such as `number`). Upstream
+        // returns an object's class's instance metatable, and the global metatable of the type for a class.
+        mt = NULL;
         break;
     default:
         mt = L->global->mt[ttype(obj)];
@@ -1125,6 +1130,14 @@ int lua_setmetatable(lua_State* L, int objindex)
         if (mt)
             luaC_objbarrier(L, uvalue(obj), mt);
         break;
+    }
+    case LUA_TOBJECT:
+    case LUA_TCLASS:
+    {
+        // Luwu Classes (rfcs/classes): the default case would install a metatable for every value
+        // of the type, which the language doesn't allow for classes and objects. Upstream takes the
+        // default case for both.
+        luaG_runerror(L, "cannot set the metatable of a %s", luaT_typenames[ttype(obj)]);
     }
     default:
     {
@@ -1694,6 +1707,102 @@ void* lua_getstringexternaluserdata(lua_State* L, int idx)
         return tsvalue(p)->ext.userdata;
     }
     return nullptr;
+}
+
+// Luwu Classes (rfcs/classes): the class a class-or-object value belongs to, or NULL for any other
+// value.
+static LuauClass* classofvalue(const TValue* o)
+{
+    if (ttisclass(o))
+        return classvalue(o);
+    if (ttisobject(o))
+        return objectvalue(o)->lclass;
+    return NULL;
+}
+
+static const TValue* findclassmember(lua_State* L, int idx, const char* membername, LuauClass** classdef)
+{
+    const TValue* o = index2addr(L, idx);
+    *classdef = classofvalue(o);
+    if (!*classdef)
+        luaG_runerror(L, "expected a class or object, got %s", luaT_objtypename(L, o));
+
+    return luaH_getstr((*classdef)->memberstooffset, luaS_new(L, membername));
+}
+
+void lua_newobject(lua_State* L, int idx)
+{
+    StkId cls = index2addr(L, idx);
+    if (!ttisclass(cls))
+        luaG_runerror(L, "attempt to construct a %s value", luaT_objtypename(L, cls));
+
+    int nargs = cast_int(L->top - (cls + 1));
+    api_check(L, nargs >= 0);
+
+    luaC_checkGC(L);
+    luaC_threadbarrier(L);
+
+    LuauClass* classdef = classvalue(cls);
+
+    // Construction runs here instead of through the class's `__call`. Doing it here skips the private
+    // constructor check, because the embedder is trusted. It also reads `__init` by offset rather than
+    // as a member, since `__init` is never readable by name. The object replaces the class in its stack
+    // slot. That anchors it during construction, and once the arguments are dropped it ends up exactly
+    // where the class was.
+    ptrdiff_t objectslot = savestack(L, cls);
+    LuauObject* object = luaR_newobject(L, classdef);
+    setobjectvalue(L, cls, object);
+
+    if (!classdef->hascustominit)
+    {
+        // an object argument's private fields are read with the embedder's rights, like any access it makes
+        luaR_initpodobject(L, classdef, object, cls + 1, nargs, NULL);
+        L->top = restorestack(L, objectslot) + 1;
+        return;
+    }
+
+    const TValue* init = &classdef->staticmembers[classdef->initoffset - classdef->numberofinstancemembers];
+
+    if (!lua_checkstack(L, 2 + nargs))
+        luaG_runerror(L, "stack overflow (class constructor arguments)");
+    cls = restorestack(L, objectslot);
+    setobj2s(L, L->top, init);
+    setobj2s(L, L->top + 1, cls);
+    for (int i = 0; i < nargs; i++)
+        setobj2s(L, L->top + 2 + i, cls + 1 + i);
+    L->top += 2 + nargs;
+
+    lua_call(L, 1 + nargs, 0);
+
+    L->top = restorestack(L, objectslot) + 1;
+}
+
+int lua_getmemberaccess(lua_State* L, int idx, const char* membername)
+{
+    LuauClass* classdef;
+    const TValue* offset = findclassmember(L, idx, membername, &classdef);
+    if (ttisnil(offset))
+        return LUA_MEMBERMISSING;
+
+    return (classdef->memberflags[uint32_t(nvalue(offset))] & LBC_CLASSMEMBER_PRIVATE) ? LUA_MEMBERPRIVATE : LUA_MEMBERPUBLIC;
+}
+
+int lua_ismemberconst(lua_State* L, int idx, const char* membername)
+{
+    LuauClass* classdef;
+    const TValue* offset = findclassmember(L, idx, membername, &classdef);
+    if (ttisnil(offset))
+        return 0;
+
+    uint32_t offsetnum = uint32_t(nvalue(offset));
+    // functions (static members) are always immutable
+    return offsetnum >= classdef->numberofinstancemembers || (classdef->memberflags[offsetnum] & LBC_CLASSMEMBER_CONST) != 0;
+}
+
+const char* lua_getclassname(lua_State* L, int idx)
+{
+    LuauClass* classdef = classofvalue(index2addr(L, idx));
+    return classdef ? getstr(classdef->name) : NULL;
 }
 
 static const char* aux_upvalue(StkId fi, int n, TValue** val)

@@ -1,4 +1,4 @@
-# `table.drop` & `table.remove` lint improvement
+# table.drop (`table.drop` & `table.remove` lint improvement)
 
 FFlags: LuwuTableDrop, LuwuTableRemoveFootgunLint
 

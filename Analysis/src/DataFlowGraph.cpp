@@ -12,7 +12,7 @@
 
 LUAU_FASTFLAG(DebugLuauFreezeArena)
 LUAU_FASTFLAG(LuauSolverV2)
-LUAU_FASTFLAG(DebugLuauUserDefinedClasses)
+LUAU_FASTFLAG(LuwuClasses)
 LUAU_FASTFLAGVARIABLE(LuauDoNotOverwriteAstDefs)
 LUAU_FASTFLAGVARIABLE(LuauAvoidTrivialPhis)
 LUAU_FASTFLAG(LuwuDefaultArguments)
@@ -464,7 +464,7 @@ ControlFlow DataFlowGraphBuilder::visit(AstStat* s)
         return visit(d);
     else if (auto d = s->as<AstStatClass>())
     {
-        LUAU_ASSERT(FFlag::DebugLuauUserDefinedClasses);
+        LUAU_ASSERT(FFlag::LuwuClasses);
         return visit(d);
     }
     else if (auto error = s->as<AstStatError>())
@@ -883,12 +883,40 @@ ControlFlow DataFlowGraphBuilder::visit(AstStatDeclareExternType* d)
 
 ControlFlow DataFlowGraphBuilder::visit(AstStatClass* d)
 {
-    LUAU_ASSERT(FFlag::DebugLuauUserDefinedClasses);
+    LUAU_ASSERT(FFlag::LuwuClasses);
     DefId def = defArena->freshCell(d->name, d->name->location);
 
     graph.localDefs[d->name] = def;
     currentScope()->bindings[d->name->name] = def;
     captures[d->name->name].allVersions.push_back(def);
+
+    // Luwu Classes (rfcs/classes): a primary constructor's parameters are visible to the class's
+    // field initializer expressions and to nothing else, so they get a scope of their own that the
+    // class's methods are visited outside of. They are compiled into the synthesized `__init`, hence
+    // the function-flavored scope, and every parameter needs a def before a field initializer that
+    // refers to it is visited.
+    DfgScope* primaryConstructorScope = nullptr;
+
+    if (d->primaryConstructor)
+    {
+        primaryConstructorScope = makeChildScope(DfgScope::Function);
+        PushScope ps{scopeStack, primaryConstructorScope};
+
+        for (AstLocal* param : d->primaryConstructor->args)
+        {
+            if (param->annotation)
+                visitType(param->annotation);
+
+            DefId def = defArena->freshCell(param, param->location);
+            graph.localDefs[param] = def;
+            primaryConstructorScope->bindings[param] = def;
+            captures[param].allVersions.push_back(def);
+        }
+
+        for (AstExpr* paramDefault : d->primaryConstructor->argsDefaults)
+            if (paramDefault)
+                visitExpr(paramDefault);
+    }
 
     for (const auto& member : d->members)
     {
@@ -898,6 +926,16 @@ ControlFlow DataFlowGraphBuilder::visit(AstStatClass* d)
                 {
                     if (prop.ty)
                         visitType(prop.ty);
+                    if (prop.defaultValue)
+                    {
+                        if (primaryConstructorScope)
+                        {
+                            PushScope ps{scopeStack, primaryConstructorScope};
+                            visitExpr(prop.defaultValue);
+                        }
+                        else
+                            visitExpr(prop.defaultValue);
+                    }
                 },
                 [&](const AstClassMethod& method)
                 {

@@ -32,7 +32,7 @@ LUAU_FASTFLAGVARIABLE(DebugLuauFreezeDuringUnification)
 LUAU_FASTFLAG(LuauInstantiateInSubtyping)
 LUAU_FASTFLAG(LuauExportValueSyntax)
 LUAU_FASTFLAG(LuauExportValueTypecheck)
-LUAU_FASTFLAG(DebugLuauUserDefinedClasses)
+LUAU_FASTFLAG(LuwuClasses)
 LUAU_FASTFLAG(LuwuDefaultArguments)
 
 namespace Luau
@@ -403,7 +403,7 @@ ControlFlow TypeChecker::check(const ScopePtr& scope, const AstStat& program)
 
         return ControlFlow::None;
     }
-    else if (FFlag::DebugLuauUserDefinedClasses && program.is<AstStatClass>())
+    else if (FFlag::LuwuClasses && program.is<AstStatClass>())
     {
         reportError(program.as<AstStatClass>()->name->location, GenericError{"class keyword is illegal here"});
         return ControlFlow::None;
@@ -6624,8 +6624,11 @@ void TypeChecker::resolve(const TypeGuardPredicate& typeguardP, RefinementMap& r
         return addRefinement(refis, typeguardP.lvalue, errorRecoveryType(scope));
     }
 
-    // We're only interested in the root type of any extern type.
-    if (auto etv = get<ExternType>(type); !etv || (etv->parent != builtinTypes->externType && !hasTag(type, kTypeofRootTag)))
+    // We're only interested in a type `typeof` can name: a userdata datatype
+    // root (a direct child of the `userdata` root), or the `object`/`class`
+    // roots themselves (an individual class's typeof is "object", not its name).
+    if (auto etv = get<ExternType>(type); !etv || (etv->parent != builtinTypes->externType && type != builtinTypes->objectType &&
+                                                   type != builtinTypes->classType && !hasTag(type, kTypeofRootTag)))
         return addRefinement(refis, typeguardP.lvalue, errorRecoveryType(scope));
 
     // This probably hints at breaking out type filtering functions from the predicate solver so that typeof is not tightly coupled with IsA.

@@ -1069,7 +1069,7 @@ TEST_CASE_FIXTURE(SubtypeFixture, "class A and B not subtypes of each other")
 
 TEST_CASE_FIXTURE(SubtypeFixture, "Classes are subtypes of themselves")
 {
-    ScopedFastFlag sff{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
     TypeId a = userDefinedCls("A");
     TypeId b = userDefinedCls("B");
     CHECK_IS_SUBTYPE(a, a);

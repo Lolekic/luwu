@@ -1,14 +1,19 @@
 name: benchmark
 
+# TODO: re-enable once luwu.org is hosted, storing results somewhere luwu.org can chart them.
+# Inherited from upstream, this pushed results to luau-lang/benchmark-data using their BENCH_GITHUB_TOKEN
+# secret, which we don't have, so every push to master failed at "Checkout benchmark results". For now it
+# only runs manually and results stay in the job logs; the steps that store and push them are commented out.
 on:
-  push:
-    branches:
-      - master
-    paths-ignore:
-      - "docs/**"
-      - "papers/**"
-      - "rfcs/**"
-      - "*.md"
+  workflow_dispatch:
+  # push:
+  #   branches:
+  #     - master
+  #   paths-ignore:
+  #     - "docs/**"
+  #     - "papers/**"
+  #     - "rfcs/**"
+  #     - "*.md"
 
 jobs:
   callgrind:
@@ -84,62 +89,63 @@ jobs:
           valgrind --tool=callgrind ./luau-compile --codegennull -O2 bench/other/regex.lua 2>&1 | filter regex-O2-codegen | tee -a compile-output.txt
           valgrind --tool=callgrind ./luau-compile --codegennull -O2 -t1 bench/other/regex.lua 2>&1 | filter regex-O2-t1-codegen | tee -a compile-output.txt
 
-      - name: Checkout benchmark results
-        uses: actions/checkout@v3
-        with:
-          repository: ${{ matrix.benchResultsRepo.name }}
-          ref: ${{ matrix.benchResultsRepo.branch }}
-          token: ${{ secrets.BENCH_GITHUB_TOKEN }}
-          path: "./gh-pages"
+      # TODO(luwu.org): store results for the website instead of upstream's benchmark-data repo.
+      # - name: Checkout benchmark results
+      #   uses: actions/checkout@v3
+      #   with:
+      #     repository: ${{ matrix.benchResultsRepo.name }}
+      #     ref: ${{ matrix.benchResultsRepo.branch }}
+      #     token: ${{ secrets.BENCH_GITHUB_TOKEN }}
+      #     path: "./gh-pages"
 
-      - name: Store results (bench)
-        uses: Roblox/rhysd-github-action-benchmark@v-luau
-        with:
-          name: callgrind clang
-          tool: "benchmarkluau"
-          output-file-path: ./bench-output.txt
-          external-data-json-path: ./gh-pages/bench.json
+      # - name: Store results (bench)
+      #   uses: Roblox/rhysd-github-action-benchmark@v-luau
+      #   with:
+      #     name: callgrind clang
+      #     tool: "benchmarkluau"
+      #     output-file-path: ./bench-output.txt
+      #     external-data-json-path: ./gh-pages/bench.json
 
-      - name: Store results (bench-codegen)
-        uses: Roblox/rhysd-github-action-benchmark@v-luau
-        with:
-          name: callgrind codegen
-          tool: "benchmarkluau"
-          output-file-path: ./bench-codegen-output.txt
-          external-data-json-path: ./gh-pages/bench-codegen.json
+      # - name: Store results (bench-codegen)
+      #   uses: Roblox/rhysd-github-action-benchmark@v-luau
+      #   with:
+      #     name: callgrind codegen
+      #     tool: "benchmarkluau"
+      #     output-file-path: ./bench-codegen-output.txt
+      #     external-data-json-path: ./gh-pages/bench-codegen.json
 
-      - name: Store results (bench-gcc)
-        uses: Roblox/rhysd-github-action-benchmark@v-luau
-        with:
-          name: callgrind gcc
-          tool: "benchmarkluau"
-          output-file-path: ./bench-gcc-output.txt
-          external-data-json-path: ./gh-pages/bench-gcc.json
+      # - name: Store results (bench-gcc)
+      #   uses: Roblox/rhysd-github-action-benchmark@v-luau
+      #   with:
+      #     name: callgrind gcc
+      #     tool: "benchmarkluau"
+      #     output-file-path: ./bench-gcc-output.txt
+      #     external-data-json-path: ./gh-pages/bench-gcc.json
 
-      - name: Store results (analyze)
-        uses: Roblox/rhysd-github-action-benchmark@v-luau
-        with:
-          name: luau-analyze
-          tool: "benchmarkluau"
-          output-file-path: ./analyze-output.txt
-          external-data-json-path: ./gh-pages/analyze.json
+      # - name: Store results (analyze)
+      #   uses: Roblox/rhysd-github-action-benchmark@v-luau
+      #   with:
+      #     name: luau-analyze
+      #     tool: "benchmarkluau"
+      #     output-file-path: ./analyze-output.txt
+      #     external-data-json-path: ./gh-pages/analyze.json
 
-      - name: Store results (compile)
-        uses: Roblox/rhysd-github-action-benchmark@v-luau
-        with:
-          name: luau-compile
-          tool: "benchmarkluau"
-          output-file-path: ./compile-output.txt
-          external-data-json-path: ./gh-pages/compile.json
+      # - name: Store results (compile)
+      #   uses: Roblox/rhysd-github-action-benchmark@v-luau
+      #   with:
+      #     name: luau-compile
+      #     tool: "benchmarkluau"
+      #     output-file-path: ./compile-output.txt
+      #     external-data-json-path: ./gh-pages/compile.json
 
-      - name: Push benchmark results
-        if: github.event_name == 'push'
-        run: |
-          echo "Pushing benchmark results..."
-          cd gh-pages
-          git config user.name github-actions
-          git config user.email github@users.noreply.github.com
-          git add *.json
-          git commit -m "Add benchmarks results for ${{ github.sha }}"
-          git push
-          cd ..
+      # - name: Push benchmark results
+      #   if: github.event_name == 'push'
+      #   run: |
+      #     echo "Pushing benchmark results..."
+      #     cd gh-pages
+      #     git config user.name github-actions
+      #     git config user.email github@users.noreply.github.com
+      #     git add *.json
+      #     git commit -m "Add benchmarks results for ${{ github.sha }}"
+      #     git push
+      #     cd ..

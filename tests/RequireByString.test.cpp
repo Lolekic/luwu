@@ -24,8 +24,7 @@
 #include <vector>
 
 LUAU_FASTFLAG(LuauExportValueSyntax)
-LUAU_FASTFLAG(DebugLuauUserDefinedClasses)
-LUAU_FASTFLAG(DebugLuauUserDefinedClassesRuntime)
+LUAU_FASTFLAG(LuwuClasses)
 LUAU_FASTFLAG(LuauCyclicRequireShortCircuit)
 LUAU_DYNAMIC_FASTFLAG(LuauSelfIsSelfAndAlwaysSelf)
 
@@ -1305,9 +1304,7 @@ TEST_CASE_FIXTURE(ReplWithPathFixture, "RequireExportTrap")
 
 TEST_CASE("RequireExportClass")
 {
-    ScopedFastFlag sffs[] = {
-        {FFlag::LuauExportValueSyntax, true}, {FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::DebugLuauUserDefinedClassesRuntime, true}
-    };
+    ScopedFastFlag sffs[] = {{FFlag::LuauExportValueSyntax, true}, {FFlag::LuwuClasses, true}};
 
     // we create a new fixture so the new lua_State has the class library
     ReplWithPathFixture fixture;

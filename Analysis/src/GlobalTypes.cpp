@@ -3,7 +3,7 @@
 #include "Luau/GlobalTypes.h"
 
 LUAU_FASTFLAG(LuauIntegerType2)
-LUAU_FASTFLAG(DebugLuauUserDefinedClasses)
+LUAU_FASTFLAG(LuwuClasses)
 LUAU_FASTFLAG(LuauTruthyFalsy)
 
 namespace Luau
@@ -33,7 +33,9 @@ GlobalTypes::GlobalTypes(NotNull<BuiltinTypes> builtinTypes, SolverMode mode)
         globalScope->addBuiltinTypeBinding("truthy", TypeFun{{}, builtinTypes->truthyType});
         globalScope->addBuiltinTypeBinding("falsy", TypeFun{{}, builtinTypes->falsyType});
     }
-    if (FFlag::DebugLuauUserDefinedClasses)
+    globalScope->addBuiltinTypeBinding("userdata", TypeFun{{}, builtinTypes->externType});
+    globalScope->addBuiltinTypeBinding("vector", TypeFun{{}, builtinTypes->vectorType});
+    if (FFlag::LuwuClasses)
     {
         globalScope->addBuiltinTypeBinding("object", TypeFun{{}, builtinTypes->objectType});
         globalScope->addBuiltinTypeBinding("class", TypeFun{{}, builtinTypes->classType});
@@ -43,6 +45,7 @@ GlobalTypes::GlobalTypes(NotNull<BuiltinTypes> builtinTypes, SolverMode mode)
     TypeId stringMetatableTy = makeStringMetatable(builtinTypes, mode);
     asMutable(builtinTypes->stringType)->ty.emplace<PrimitiveType>(PrimitiveType::String, stringMetatableTy);
     persist(stringMetatableTy);
+    makeVectorMetatable(builtinTypes);
     freeze(*builtinTypes->arena);
 }
 

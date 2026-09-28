@@ -56,8 +56,7 @@ LUAU_FASTINT(LuauTypeInferIterationLimit)
 LUAU_FASTINT(LuauTarjanChildLimit)
 LUAU_FASTFLAG(DebugLuauFreezeArena)
 LUAU_FASTFLAG(DebugLuauAbortingChecks)
-LUAU_FASTFLAG(DebugLuauUserDefinedClasses)
-LUAU_FASTFLAG(DebugLuauUserDefinedClassesRuntime)
+LUAU_FASTFLAG(LuwuClasses)
 
 const double kTypecheckTimeoutSec = 4.0;
 
@@ -280,8 +279,8 @@ DEFINE_PROTO_FUZZER(const luau::ModuleSet& message)
 
     FFlag::DebugLuauFreezeArena.value = true;
     FFlag::DebugLuauAbortingChecks.value = true;
-    FFlag::DebugLuauUserDefinedClasses.value = true;
-    FFlag::DebugLuauUserDefinedClassesRuntime.value = true;
+    FFlag::LuwuClasses.value = true;
+    FFlag::LuwuClasses.value = true;
 
     std::vector<std::string> sources = protoprint(message, kFuzzTypes);
 
