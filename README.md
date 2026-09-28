@@ -1,7 +1,5 @@
 # Luwu ![CI](https://github.com/luwu-community/luwu/actions/workflows/build.yml/badge.svg)
 
-====
-
 Luwu is a fast, small, safe, gradually typed embeddable scripting language based on [Luau](https://luau.org).
 
 Luwu is a community-led fork intended to provide a more featureful and helpful experience for general-purpose, open-source language development.
@@ -18,9 +16,9 @@ For RFCs and changes to the language, please see the [RFCs folder](/rfcs/). To p
 
 Luwu is an embeddable programming language, but it also comes with two command-line tools by default, `luwu` and `luwu-analyze`.
 
-`luau` is a command-line REPL and can also run input files. Note that REPL runs in a sandboxed environment and as such doesn't have access to the underlying file system except for ability to `require` modules.
+`luwu` is a command-line REPL and can also run input files. Note that REPL runs in a sandboxed environment and as such doesn't have access to the underlying file system except for ability to `require` modules.
 
-`luwu-analyze` is a command-line type checker and linter; given a set of input files, it produces errors/warnings according to the file configuration, which can be customized by using `--!` comments in the files or [`.luaurc`](https://rfcs.luau.org/config-luaurc) files. For details, please refer to our [type checking](https://luau.org/typecheck) and [linting](https://luau.org/lint) documentation. Our community maintains a language server frontend for `luwu-analyze` called [luau-lsp](https://github.com/JohnnyMorganz/luau-lsp) for use with text editors.
+`luwu-analyze` is a command-line type checker and linter; given a set of input files, it produces errors/warnings according to the file configuration, which can be customized by using `--!` comments in the files or [`.luaurc`](https://rfcs.luau.org/config-luaurc) files. For details, please refer to our [type checking](https://luau.org/typecheck) and [linting](https://luau.org/lint) documentation. Globals that a host provides (a runtime like seal or lune, or your own embedder) can be loaded from a definition file with `--defs=<path>`, which can be repeated. Our community maintains a language server frontend for `luwu-analyze` called [luwu-lsp](https://github.com/luwu-community/luwu-lsp) for use with text editors.
 
 ## Installation
 
