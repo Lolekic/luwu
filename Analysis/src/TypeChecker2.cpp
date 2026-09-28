@@ -43,8 +43,7 @@ LUAU_FASTFLAG(LuauImproveUniqueTableWidthSubtyping)
 LUAU_FASTFLAG(LuauBidirectionalInferenceSimplifyTables)
 LUAU_FASTFLAGVARIABLE(LuauBetterPackAndVariadicMismatchErrors)
 
-LUAU_FASTFLAG(DebugLuauUserDefinedClasses)
-LUAU_FASTFLAG(LuwuBetterUserDefinedClasses)
+LUAU_FASTFLAG(LuwuClasses)
 LUAU_FASTFLAG(LuwuDefaultArguments)
 
 namespace Luau
@@ -1378,7 +1377,7 @@ void TypeChecker2::visit(AstStatDeclareExternType* stat)
 
 void TypeChecker2::visit(AstStatClass* stat)
 {
-    LUAU_ASSERT(FFlag::DebugLuauUserDefinedClasses);
+    LUAU_ASSERT(FFlag::LuwuClasses);
 
     visitGenerics(stat->generics, stat->genericPacks);
 
@@ -1456,114 +1455,108 @@ void TypeChecker2::visit(AstStatClass* stat)
     // A class whose fields are all private and which has no functions can be constructed, but nothing
     // can ever read or write what it holds: only the class's own functions may touch a private field,
     // and there are none (rfcs/classes).
-    if (FFlag::LuwuBetterUserDefinedClasses)
+    size_t fieldCount = 0;
+    bool hasPublicField = false;
+    bool hasFunction = false;
+
+    for (const AstClassMember& member : stat->members)
     {
-        size_t fieldCount = 0;
-        bool hasPublicField = false;
-        bool hasFunction = false;
-
-        for (const AstClassMember& member : stat->members)
+        if (const AstClassProperty* prop = member.get_if<AstClassProperty>())
         {
-            if (const AstClassProperty* prop = member.get_if<AstClassProperty>())
+            ++fieldCount;
+            hasPublicField |= prop->visibility == AstClassMemberVisibility::Public;
+        }
+        else
+            hasFunction = true;
+    }
+
+    // a primary constructor parameter declares a field too, unless the class body restates it, in
+    // which case the restatement was already counted above
+    if (const AstClassPrimaryConstructor* primaryConstructor = stat->primaryConstructor)
+    {
+        for (size_t i = 0; i < primaryConstructor->args.size; ++i)
+        {
+            AstName paramName = primaryConstructor->args.data[i]->name;
+
+            bool restated = false;
+            for (const AstClassMember& member : stat->members)
             {
-                ++fieldCount;
-                hasPublicField |= prop->visibility == AstClassMemberVisibility::Public;
+                const AstClassProperty* prop = member.get_if<AstClassProperty>();
+                if (prop && prop->name == paramName)
+                    restated = true;
             }
-            else
-                hasFunction = true;
+
+            if (restated)
+                continue;
+
+            ++fieldCount;
+
+            if (primaryConstructor->argsQualifiers.size != primaryConstructor->args.size ||
+                primaryConstructor->argsQualifiers.data[i].visibility == AstClassMemberVisibility::Public)
+                hasPublicField = true;
         }
+    }
 
-        // a primary constructor parameter declares a field too, unless the class body restates it, in
-        // which case the restatement was already counted above
-        if (const AstClassPrimaryConstructor* primaryConstructor = stat->primaryConstructor)
-        {
-            for (size_t i = 0; i < primaryConstructor->args.size; ++i)
-            {
-                AstName paramName = primaryConstructor->args.data[i]->name;
-
-                bool restated = false;
-                for (const AstClassMember& member : stat->members)
-                {
-                    const AstClassProperty* prop = member.get_if<AstClassProperty>();
-                    if (prop && prop->name == paramName)
-                        restated = true;
-                }
-
-                if (restated)
-                    continue;
-
-                ++fieldCount;
-
-                if (primaryConstructor->argsQualifiers.size != primaryConstructor->args.size ||
-                    primaryConstructor->argsQualifiers.data[i].visibility == AstClassMemberVisibility::Public)
-                    hasPublicField = true;
-            }
-        }
-
-        if (fieldCount > 0 && !hasPublicField && !hasFunction)
-        {
-            NotNull<Scope> scope{findInnermostScope(stat->location)};
-            if (std::optional<TypeFun> classTypeFun = scope->lookupType(stat->name->name.value))
-                reportError(UnusableClass{classTypeFun->type}, stat->name->location);
-        }
+    if (fieldCount > 0 && !hasPublicField && !hasFunction)
+    {
+        NotNull<Scope> scope{findInnermostScope(stat->location)};
+        if (std::optional<TypeFun> classTypeFun = scope->lookupType(stat->name->name.value))
+            reportError(UnusableClass{classTypeFun->type}, stat->name->location);
     }
 
     // A class with a private constructor can only be instantiated from its own body. If nothing there calls it
     // (`Name(...)` or `Name { ... }`, in a method, a closure nested in one, or a field default), no instance can
     // ever exist (rfcs/classes).
-    if (FFlag::LuwuBetterUserDefinedClasses)
+    bool privateConstructor = stat->primaryConstructor && stat->primaryConstructor->visibility == AstClassMemberVisibility::Private;
+
+    for (const AstClassMember& member : stat->members)
     {
-        bool privateConstructor = stat->primaryConstructor && stat->primaryConstructor->visibility == AstClassMemberVisibility::Private;
+        const AstClassMethod* method = member.get_if<AstClassMethod>();
+        if (method && method->functionName == "__init" && method->visibility == AstClassMemberVisibility::Private)
+            privateConstructor = true;
+    }
+
+    if (privateConstructor)
+    {
+        // A local must be the class's own binding: a different local with the same name (another
+        // module's class of that name) doesn't construct this one. A global matches by name, since
+        // the parser makes a reference to the class from before its declaration a global.
+        struct ConstructorCallFinder : AstVisitor
+        {
+            AstLocal* classLocal = nullptr;
+            bool found = false;
+
+            bool visit(AstExprCall* call) override
+            {
+                AstExpr* callee = call->func;
+                while (AstExprGroup* group = callee->as<AstExprGroup>())
+                    callee = group->expr;
+
+                if (AstExprGlobal* global = callee->as<AstExprGlobal>(); global && global->name == classLocal->name)
+                    found = true;
+                else if (AstExprLocal* local = callee->as<AstExprLocal>(); local && local->local == classLocal)
+                    found = true;
+
+                return !found;
+            }
+        };
+
+        ConstructorCallFinder finder;
+        finder.classLocal = stat->name;
 
         for (const AstClassMember& member : stat->members)
         {
-            const AstClassMethod* method = member.get_if<AstClassMethod>();
-            if (method && method->functionName == "__init" && method->visibility == AstClassMemberVisibility::Private)
-                privateConstructor = true;
+            if (const AstClassMethod* method = member.get_if<AstClassMethod>())
+                method->function->visit(&finder);
+            else if (const AstClassProperty* prop = member.get_if<AstClassProperty>(); prop && prop->defaultValue)
+                prop->defaultValue->visit(&finder);
         }
 
-        if (privateConstructor)
+        if (!finder.found)
         {
-            // A local must be the class's own binding: a different local with the same name (another
-            // module's class of that name) doesn't construct this one. A global matches by name, since
-            // the parser makes a reference to the class from before its declaration a global.
-            struct ConstructorCallFinder : AstVisitor
-            {
-                AstLocal* classLocal = nullptr;
-                bool found = false;
-
-                bool visit(AstExprCall* call) override
-                {
-                    AstExpr* callee = call->func;
-                    while (AstExprGroup* group = callee->as<AstExprGroup>())
-                        callee = group->expr;
-
-                    if (AstExprGlobal* global = callee->as<AstExprGlobal>(); global && global->name == classLocal->name)
-                        found = true;
-                    else if (AstExprLocal* local = callee->as<AstExprLocal>(); local && local->local == classLocal)
-                        found = true;
-
-                    return !found;
-                }
-            };
-
-            ConstructorCallFinder finder;
-            finder.classLocal = stat->name;
-
-            for (const AstClassMember& member : stat->members)
-            {
-                if (const AstClassMethod* method = member.get_if<AstClassMethod>())
-                    method->function->visit(&finder);
-                else if (const AstClassProperty* prop = member.get_if<AstClassProperty>(); prop && prop->defaultValue)
-                    prop->defaultValue->visit(&finder);
-            }
-
-            if (!finder.found)
-            {
-                NotNull<Scope> scope{findInnermostScope(stat->location)};
-                if (std::optional<TypeFun> classTypeFun = scope->lookupType(stat->name->name.value))
-                    reportError(UninstantiableClass{classTypeFun->type}, stat->name->location);
-            }
+            NotNull<Scope> scope{findInnermostScope(stat->location)};
+            if (std::optional<TypeFun> classTypeFun = scope->lookupType(stat->name->name.value))
+                reportError(UninstantiableClass{classTypeFun->type}, stat->name->location);
         }
     }
 
@@ -2244,7 +2237,7 @@ TypeId TypeChecker2::stripFromNilAndReport(TypeId ty, const Location& location)
 
 void TypeChecker2::checkPrivatePropertyAccess(TypeId tableTy, const std::string& prop, const Location& location)
 {
-    if (!FFlag::DebugLuauUserDefinedClasses)
+    if (!FFlag::LuwuClasses)
         return;
 
     const ExternType* cls = get<ExternType>(follow(tableTy));
@@ -2266,7 +2259,7 @@ void TypeChecker2::checkPrivatePropertyAccess(TypeId tableTy, const std::string&
 
 bool TypeChecker2::checkConstructorReadByName(TypeId tableTy, const std::string& prop, ValueContext context, const Location& location)
 {
-    if (!FFlag::DebugLuauUserDefinedClasses || !FFlag::LuwuBetterUserDefinedClasses)
+    if (!FFlag::LuwuClasses)
         return false;
 
     if (context != ValueContext::RValue || prop != "__init")
@@ -2305,7 +2298,7 @@ void TypeChecker2::checkConstPropertyAssignment(
     const Location& location
 )
 {
-    if (!FFlag::DebugLuauUserDefinedClasses || !FFlag::LuwuBetterUserDefinedClasses)
+    if (!FFlag::LuwuClasses)
         return;
 
     if (context != ValueContext::LValue)
@@ -2328,7 +2321,7 @@ void TypeChecker2::checkConstPropertyAssignment(
 
 void TypeChecker2::checkPrivateConstructorAccess(TypeId classTy, const Location& location)
 {
-    if (!FFlag::DebugLuauUserDefinedClasses || !FFlag::LuwuBetterUserDefinedClasses)
+    if (!FFlag::LuwuClasses)
         return;
 
     const ExternType* cls = get<ExternType>(follow(classTy));
@@ -3274,7 +3267,7 @@ void TypeChecker2::visit(AstTypeReference* ty)
     // `class<T>` is routed to a type function by ConstraintGenerator rather than resolved through
     // the `class` alias, which is the zero-parameter top type; checking its arity against that
     // alias would always report a spurious mismatch.
-    if (FFlag::DebugLuauUserDefinedClasses && !ty->prefix.has_value() && ty->name == "class" && ty->hasParameterList)
+    if (FFlag::LuwuClasses && !ty->prefix.has_value() && ty->name == "class" && ty->hasParameterList)
     {
         for (const AstTypeOrPack& param : ty->parameters)
         {
@@ -3479,7 +3472,7 @@ void TypeChecker2::visit(AstTypeTypeof* ty)
     // `typeof(Cat)` and `class<Cat>` name the same type, but only the latter says so at a glance:
     // an ExternType stringifies as its bare name, so `typeof(Cat)` reads as the object type in
     // every hover and error message. Steer users to the spelling that doesn't.
-    if (FFlag::DebugLuauUserDefinedClasses)
+    if (FFlag::LuwuClasses)
     {
         if (auto resolved = module->astResolvedTypes.find(ty))
         {
@@ -4327,9 +4320,31 @@ PropertyTypes TypeChecker2::lookupProp(
     if (normValid)
         fetch(norm->booleans);
 
-    if (FFlag::DebugLuauUserDefinedClasses)
+    if (FFlag::LuwuClasses)
     {
-        if (normValid)
+        // Luwu Classes (rfcs/classes): upstream checks each extern type part on its own here, so that a union of
+        // objects needs the property on every member. It skips the table shapes intersected with those parts, so
+        // upstream reports `Instance` as missing `brushes` in `Instance & { brushes: Instance }`. A shape that has the
+        // property gives it to every part; the shape-aware lookup below adds its type.
+        bool shapeHasProp = false;
+        for (TypeId shape : norm->externTypes.shapeExtensions)
+        {
+            DenseHashSet<TypeId> seen{nullptr};
+            // The shape-aware lookup below reports this shape's errors; don't report them twice.
+            std::vector<TypeError> shapeErrors;
+            PropertyType res = hasIndexTypeFromType(shape, prop, context, location, seen, astIndexExprType, shapeErrors);
+
+            if (res.present == NormalizationResult::HitLimits)
+                normValid = false;
+
+            if (res.present == NormalizationResult::True)
+            {
+                shapeHasProp = true;
+                break;
+            }
+        }
+
+        if (normValid && !shapeHasProp)
         {
             for (const auto& partTy : norm->externTypes.ordering)
             {
@@ -4599,7 +4614,7 @@ PropertyType TypeChecker2::hasIndexTypeFromType(
             return {normalizer.isInhabited(inhabitedTestType), {cls->indexer->indexResultType}};
         }
 
-        if (FFlag::DebugLuauUserDefinedClasses)
+        if (FFlag::LuwuClasses)
         {
             if (cls->metatable)
             {

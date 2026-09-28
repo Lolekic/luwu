@@ -9,7 +9,7 @@
 #include <climits>
 
 LUAU_FASTFLAG(LuauIntegerType2)
-LUAU_FASTFLAG(DebugLuauUserDefinedClasses)
+LUAU_FASTFLAG(LuwuClasses)
 LUAU_FASTFLAG(LuauEmitCallFeedback)
 LUAU_FASTFLAGVARIABLE(LuauVirtualBcBuilder)
 
@@ -1474,7 +1474,7 @@ std::string BytecodeBuilder::getError(const std::string& message)
 uint8_t BytecodeBuilder::getVersion()
 {
     // Luwu Classes (rfcs/classes): class bytecode is still a work-in-progress format
-    if (FFlag::DebugLuauUserDefinedClasses)
+    if (FFlag::LuwuClasses)
         return LWBC_VERSION_WIP;
 
     return LWBC_VERSION_TARGET;

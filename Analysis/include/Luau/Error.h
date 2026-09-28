@@ -409,8 +409,8 @@ struct NonStrictFunctionDefinitionError
     bool operator==(const NonStrictFunctionDefinitionError& rhs) const;
 };
 
-// Accessing a `private` member of a user-defined class from outside of that class's own
-// definition block (see FFlag::DebugLuauUserDefinedClasses, FFlag::LuwuBetterUserDefinedClasses).
+// Luwu Classes (rfcs/classes): accessing a `private` member of a class from outside of that class's
+// own definition block.
 struct PrivatePropertyAccess
 {
     TypeId table;
@@ -423,9 +423,8 @@ struct PrivatePropertyAccess
     bool operator==(const PrivatePropertyAccess& rhs) const;
 };
 
-// Calling `ClassName(...)` directly from outside the class's own definition block, when the
-// class's `__init` constructor is `private` (see FFlag::DebugLuauUserDefinedClasses,
-// FFlag::LuwuBetterUserDefinedClasses).
+// Luwu Classes (rfcs/classes): calling `ClassName(...)` directly from outside the class's own
+// definition block, when the class's `__init` constructor is `private`.
 struct PrivateConstructorAccess
 {
     TypeId classTy;
@@ -433,9 +432,9 @@ struct PrivateConstructorAccess
     bool operator==(const PrivateConstructorAccess& rhs) const;
 };
 
-// A field of a class with a primary constructor that nothing can ever initialize: the class body
-// gives it no default value, no parameter shares its name, and its type does not admit `nil`
-// (see FFlag::DebugLuauUserDefinedClasses, FFlag::LuwuBetterUserDefinedClasses).
+// Luwu Classes (rfcs/classes): a field of a class with a primary constructor that nothing can ever
+// initialize: the class body gives it no default value, no parameter shares its name, and its type does
+// not admit `nil`.
 struct UninitializableClassField
 {
     TypeId classTy;
@@ -444,9 +443,8 @@ struct UninitializableClassField
     bool operator==(const UninitializableClassField& rhs) const;
 };
 
-// A class whose fields are all `private` and which has no functions: it can be constructed, but no
-// code can ever read or write what it holds (see FFlag::DebugLuauUserDefinedClasses,
-// FFlag::LuwuBetterUserDefinedClasses).
+// Luwu Classes (rfcs/classes): a class whose fields are all `private` and which has no functions: it
+// can be constructed, but no code can ever read or write what it holds.
 struct UnusableClass
 {
     TypeId classTy;
@@ -463,9 +461,9 @@ struct UninstantiableClass
     bool operator==(const UninstantiableClass& rhs) const;
 };
 
-// Reading `__init` by name from a class or one of its objects (`Class.__init`, `obj:__init()`):
-// construction is the only way to run a constructor, and the read raises at runtime
-// (see FFlag::DebugLuauUserDefinedClasses, FFlag::LuwuBetterUserDefinedClasses).
+// Luwu Classes (rfcs/classes): reading `__init` by name from a class or one of its objects
+// (`Class.__init`, `obj:__init()`): construction is the only way to run a constructor, and the read raises
+// at runtime.
 struct ConstructorReadByName
 {
     TypeId table;
@@ -488,8 +486,8 @@ struct PropertyAccessViolation
     bool operator==(const PropertyAccessViolation& rhs) const;
 };
 
-// Assigning to a `const` member of a user-defined class from outside of that class's own
-// `__init` constructor (see FFlag::DebugLuauUserDefinedClasses, FFlag::LuwuBetterUserDefinedClasses).
+// Luwu Classes (rfcs/classes): assigning to a `const` member of a class from outside of that class's
+// own `__init` constructor.
 struct ConstPropertyAssignment
 {
     TypeId table;

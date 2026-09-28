@@ -32,7 +32,7 @@ LUAU_FASTFLAGVARIABLE(DebugLuauFreezeDuringUnification)
 LUAU_FASTFLAG(LuauInstantiateInSubtyping)
 LUAU_FASTFLAG(LuauExportValueSyntax)
 LUAU_FASTFLAG(LuauExportValueTypecheck)
-LUAU_FASTFLAG(DebugLuauUserDefinedClasses)
+LUAU_FASTFLAG(LuwuClasses)
 LUAU_FASTFLAG(LuwuDefaultArguments)
 
 namespace Luau
@@ -403,7 +403,7 @@ ControlFlow TypeChecker::check(const ScopePtr& scope, const AstStat& program)
 
         return ControlFlow::None;
     }
-    else if (FFlag::DebugLuauUserDefinedClasses && program.is<AstStatClass>())
+    else if (FFlag::LuwuClasses && program.is<AstStatClass>())
     {
         reportError(program.as<AstStatClass>()->name->location, GenericError{"class keyword is illegal here"});
         return ControlFlow::None;

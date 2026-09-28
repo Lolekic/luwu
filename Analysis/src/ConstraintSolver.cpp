@@ -46,7 +46,7 @@ LUAU_FASTFLAGVARIABLE(LuauFixPropReadsOnMetatableTypes)
 LUAU_FASTFLAGVARIABLE(LuauAlsoInstantiateInferredArguments)
 LUAU_FASTFLAG(LuwuGenericNominals)
 LUAU_FLAGVERSION(LuauAlsoInstantiateInferredArguments, 2)
-LUAU_FASTFLAG(DebugLuauUserDefinedClasses)
+LUAU_FASTFLAG(LuwuClasses)
 LUAU_FASTFLAGVARIABLE(LuauRemoveConstraintSolverEmplace)
 LUAU_FASTFLAGVARIABLE(LuauInstantiateFunctionTypeBeforePush)
 LUAU_FASTFLAGVARIABLE(LuauAvoidCascadingRecursiveConstraintViolationError)
@@ -3981,7 +3981,7 @@ TablePropLookupResult ConstraintSolver::lookupTableProp(
         if (auto p = lookupExternTypeProp(ct, propName))
             return {{}, context == ValueContext::RValue ? p->readTy : p->writeTy};
 
-        if (FFlag::DebugLuauUserDefinedClasses)
+        if (FFlag::LuwuClasses)
         {
             if (ct->metatable)
             {

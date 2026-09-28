@@ -74,7 +74,7 @@ struct ValueVisitor : AssignmentVisitor
 
     bool visit(AstStatClass* decl) override
     {
-        if (!FFlag::DebugLuauUserDefinedClasses)
+        if (!FFlag::LuwuClasses)
             return false;
 
         // Unlike AstStatLocalFunction, we don't mark this local written just for existing --

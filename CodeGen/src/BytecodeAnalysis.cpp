@@ -11,7 +11,7 @@
 #include <algorithm>
 #include <array>
 
-LUAU_FASTFLAG(DebugLuauUserDefinedClassesRuntime)
+LUAU_FASTFLAG(LuwuClasses)
 
 namespace Luau
 {
@@ -1826,7 +1826,7 @@ void analyzeBytecodeTypes(IrFunction& function, const HostIrHooks& hostHooks)
     CODEGEN_ASSERT(proto);
 
     std::vector<int> isinstanceProvenRegs =
-        FFlag::DebugLuauUserDefinedClassesRuntime ? findIsinstanceProvenObjectRegs(function) : std::vector<int>();
+        FFlag::LuwuClasses ? findIsinstanceProvenObjectRegs(function) : std::vector<int>();
 
     BytecodeTypeInfo& bcTypeInfo = function.bcTypeInfo;
 

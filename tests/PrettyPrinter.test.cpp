@@ -10,10 +10,9 @@
 
 LUAU_FASTFLAG(LuauExportValueSyntax)
 LUAU_FASTFLAG(DebugLuauNoInline)
-LUAU_FASTFLAG(DebugLuauUserDefinedClasses)
+LUAU_FASTFLAG(LuwuClasses)
 LUAU_FASTFLAG(LuauTableEntriesDontNeedToMatchIndent)
 LUAU_FASTFLAG(LuauCstAttr)
-LUAU_FASTFLAG(LuwuBetterUserDefinedClasses)
 LUAU_FASTFLAG(DebugLuauForceOldSolver)
 LUAU_FASTFLAG(LuwuDefaultArguments)
 LUAU_FASTFLAG(LuwuGenericNominals)
@@ -2127,7 +2126,7 @@ TEST_CASE("fuzzer_nil_optional")
 
 TEST_CASE("fuzzer_class")
 {
-    ScopedFastFlag fflag{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
     const std::string code = R"( class l0 end )";
     // should not crash
     prettyPrint(code, {}, true);
@@ -2135,8 +2134,7 @@ TEST_CASE("fuzzer_class")
 
 TEST_CASE("simple_class_example")
 {
-    ScopedFastFlag fflag{FFlag::DebugLuauUserDefinedClasses, true};
-    ScopedFastFlag better{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     std::string code = R"(
 class Point
@@ -2155,8 +2153,7 @@ end
 
 TEST_CASE("remixed_simple_class")
 {
-    ScopedFastFlag fflag{FFlag::DebugLuauUserDefinedClasses, true};
-    ScopedFastFlag better{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     std::string code = R"(
 class Point
@@ -2175,7 +2172,7 @@ end
 
 TEST_CASE("simple_class_with_public_functions")
 {
-    ScopedFastFlag fflag{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     std::string code = R"(
 class Point
@@ -2195,8 +2192,7 @@ end
 TEST_CASE("class_with_method_attributes")
 {
     ScopedFastFlag fflags[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
+        {FFlag::LuwuClasses, true},
         {FFlag::LuauCstAttr, true},
     };
 
@@ -2219,8 +2215,7 @@ end
 TEST_CASE("class_round_trip_keeps_generics_defaults_and_parameter_qualifiers")
 {
     ScopedFastFlag fflags[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
+        {FFlag::LuwuClasses, true},
         {FFlag::LuwuGenericNominals, true},
         {FFlag::LuwuDefaultArguments, true},
         {FFlag::LuauExportValueSyntax, true},
@@ -2252,8 +2247,7 @@ end
 TEST_CASE("class_without_types_drops_generics")
 {
     ScopedFastFlag fflags[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
+        {FFlag::LuwuClasses, true},
         {FFlag::LuwuGenericNominals, true},
     };
 

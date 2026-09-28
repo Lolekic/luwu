@@ -82,8 +82,7 @@ LUAU_FASTFLAG(LuauXpcallFixMessageYieldPath)
 LUAU_FASTFLAG(LuauCodegenFixBufferLenCheck)
 LUAU_FASTFLAG(LuauYieldIter2)
 LUAU_FASTFLAG(LuauCustomYieldablePcalls)
-LUAU_FASTFLAG(DebugLuauUserDefinedClassesRuntime)
-LUAU_FASTFLAG(LuwuBetterUserDefinedClasses)
+LUAU_FASTFLAG(LuwuClasses)
 LUAU_FASTFLAG(DebugLuwuCompilerTrustsTypeAnnotations)
 LUAU_FASTFLAG(LuauExportValueSyntax)
 LUAU_FASTFLAG(LuwuExportedClassIsNilWorkaround)
@@ -4652,9 +4651,7 @@ TEST_CASE("UserdataDirectAccess")
 TEST_CASE("ClassesExportHoistingRepro")
 {
     ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::DebugLuauUserDefinedClassesRuntime, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
+        {FFlag::LuwuClasses, true},
         {FFlag::LuwuNonePrimitive, true},
         {FFlag::LuwuGenericNominals, true},
         {FFlag::LuauExportValueSyntax, true},
@@ -4668,9 +4665,7 @@ TEST_CASE("ClassesExportHoistingRepro")
 TEST_CASE("Classes")
 {
     ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::DebugLuauUserDefinedClassesRuntime, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
+        {FFlag::LuwuClasses, true},
         // a primary constructor's parameter defaults are function parameter defaults
         {FFlag::LuwuDefaultArguments, true},
         {FFlag::LuwuNonePrimitive, true},
@@ -4723,11 +4718,7 @@ TEST_CASE("Classes")
 
 TEST_CASE("ClassesInlining")
 {
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::DebugLuauUserDefinedClassesRuntime, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
-    };
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     // Method inlining only runs at O2, and the conformance default is O1 -- at O1 every case in this
     // file passes vacuously. See tests/conformance/classes_inlining.luau.
@@ -4758,11 +4749,7 @@ TEST_CASE("ClassesInlining")
 
 TEST_CASE("ClassesNativeCodegen")
 {
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::DebugLuauUserDefinedClassesRuntime, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
-    };
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     // Deliberately a separate file from classes.luau: that one contains `@native` functions, and a module
     // with any `@native` function natively compiles only those, so the rest of its protos stay interpreted
@@ -4775,9 +4762,7 @@ TEST_CASE("ClassesNativeCodegen")
 static void runClassesFixesConformance(const char* name)
 {
     ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::DebugLuauUserDefinedClassesRuntime, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
+        {FFlag::LuwuClasses, true},
         {FFlag::LuwuDefaultArguments, true},
         {FFlag::LuwuNonePrimitive, true},
         {FFlag::LuwuGenericNominals, true},
@@ -4869,9 +4854,7 @@ std::string classesCApiProtected(lua_State* L, std::function<void(lua_State*)> f
 TEST_CASE("ClassesCApi")
 {
     ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::DebugLuauUserDefinedClassesRuntime, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
+        {FFlag::LuwuClasses, true},
         {FFlag::LuwuDefaultArguments, true},
         {FFlag::LuwuNonePrimitive, true},
     };
@@ -5650,11 +5633,7 @@ TEST_CASE("ClassesNativeNamecallLearnsMemberSlot")
     if (!luau_codegen_supported())
         return;
 
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::DebugLuauUserDefinedClassesRuntime, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
-    };
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     StateRef globalState(luaL_newstate(), lua_close);
     lua_State* L = globalState.get();
@@ -5727,9 +5706,7 @@ counter = Counter { a = 1, b = 2 }
 TEST_CASE("ExportedClasses")
 {
     ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
-        {FFlag::DebugLuauUserDefinedClassesRuntime, true},
+        {FFlag::LuwuClasses, true},
         {FFlag::LuauExportValueSyntax, true},
         {FFlag::LuwuExportedClassIsNilWorkaround, true},
     };
@@ -6410,13 +6387,17 @@ static bool contains(const std::string& haystack, const std::string& needle)
 
 TEST_CASE("LuwuBytecodeHeader")
 {
-    std::string bytecode = Luau::compile("return 1");
-    REQUIRE(bytecode.size() > LWBC_HEADER_SIZE);
-    CHECK(uint8_t(bytecode[0]) == LWBC_MAGIC);
-    CHECK(uint8_t(bytecode[1]) == LWBC_VERSION_TARGET);
-    CHECK(getLoadError(bytecode) == "");
+    {
+        // a WIP feature's flag switches the version to LWBC_VERSION_WIP
+        ScopedFastFlag luwuClassesOff{FFlag::LuwuClasses, false};
+        std::string bytecode = Luau::compile("return 1");
+        REQUIRE(bytecode.size() > LWBC_HEADER_SIZE);
+        CHECK(uint8_t(bytecode[0]) == LWBC_MAGIC);
+        CHECK(uint8_t(bytecode[1]) == LWBC_VERSION_TARGET);
+        CHECK(getLoadError(bytecode) == "");
+    }
 
-    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
     std::string wip = Luau::compile("return 1");
     REQUIRE(wip.size() > LWBC_HEADER_SIZE);
     CHECK(uint8_t(wip[1]) == LWBC_VERSION_WIP);
@@ -6446,18 +6427,14 @@ TEST_CASE("LegacyBytecodeLoadsWithMluauAdditions")
 
     // the same function typed with a Luwu-only tag is refused, so the parameter's tag really is in the blob (`object`
     // only names the object type when classes are on)
-    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
     std::string object = asLegacyBytecode(Luau::compile("local function f(x: object, b: buffer) return buffer.isfrozen(b) end return f", options));
     CHECK(contains(getLoadError(object), "uses type tag " + std::to_string(LBC_TYPE_OBJECT)));
 }
 
 TEST_CASE("LegacyBytecodeRefusesLuwuAdditions")
 {
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::DebugLuauUserDefinedClassesRuntime, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
-    };
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     Luau::CompileOptions options;
     options.optimizationLevel = 1;
@@ -6504,11 +6481,7 @@ TEST_CASE("ClassesNativeMemberSlotCacheSkipsWideOffsets")
     if (!luau_codegen_supported())
         return;
 
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::DebugLuauUserDefinedClassesRuntime, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
-    };
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     constexpr int kMembers = 301; // f0 .. f300, each at the offset in its name
 
@@ -6584,11 +6557,7 @@ TEST_CASE("ClassesInterpreterMemberSlotCacheSkipsWideOffsets")
     // Luwu Classes (rfcs/classes): the interpreter's side of ClassesNativeMemberSlotCacheSkipsWideOffsets.
     // GETTABLEKS and NAMECALL cache a member at offset 44 in operand C, and leave it alone for offsets 300
     // and 301, which would truncate and cache some other member.
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::DebugLuauUserDefinedClassesRuntime, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
-    };
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     constexpr int kMembers = 301; // f0 .. f300, each at the offset in its name; method `m` is at 301
 

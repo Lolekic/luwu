@@ -29,9 +29,7 @@ LUAU_FASTFLAG(LuauCallFeedback)
 LUAU_FASTFLAG(LuauCodegenA64ExitUseCheck)
 LUAU_FASTFLAG(LuauBackedgeHeapCheck)
 LUAU_FASTFLAG(LuauCodegenConstVectorBufferRead)
-LUAU_FASTFLAG(DebugLuauUserDefinedClasses)
-LUAU_FASTFLAG(DebugLuauUserDefinedClassesRuntime)
-LUAU_FASTFLAG(LuwuBetterUserDefinedClasses)
+LUAU_FASTFLAG(LuwuClasses)
 LUAU_FASTFLAG(DebugLuwuCompilerTrustsTypeAnnotations)
 
 #define ensureVectorSize3() \
@@ -40,6 +38,10 @@ LUAU_FASTFLAG(DebugLuwuCompilerTrustsTypeAnnotations)
 #define ensureVectorFloat() \
     if constexpr (LUA_VECTOR_DOUBLE == 1) \
     return
+
+// Luwu Classes (rfcs/classes): with classes on, an untyped table access also gets an object path in a fallback block.
+// The table path is unchanged, but the extra blocks and values shift the numbering these expectations pin.
+#define numberBlocksWithoutClasses() ScopedFastFlag luwuClassesOff{FFlag::LuwuClasses, false}
 
 static void luauLibraryConstantLookup(const char* library, const char* member, Luau::CompileConstant* constant)
 {
@@ -2261,6 +2263,8 @@ bb_linear_17:
 // Our fast-path lowering checks that there is no metatable and all accesses are in bounds
 TEST_CASE_FIXTURE(LoweringFixture, "DuplicateArrayLoads2")
 {
+    numberBlocksWithoutClasses();
+
     CHECK_EQ(
         "\n" + getCodegenAssembly(
                    R"(
@@ -2589,6 +2593,8 @@ bb_linear_11:
 // Note that CHECK_SLOT_MATCH ensures that key is in mainposition and not nil, so metatable is not triggered
 TEST_CASE_FIXTURE(LoweringFixture, "TableNodeLoadStoreProp1")
 {
+    numberBlocksWithoutClasses();
+
     CHECK_EQ(
         "\n" + getCodegenAssembly(
                    R"(
@@ -3058,6 +3064,8 @@ bb_linear_9:
 
 TEST_CASE_FIXTURE(LoweringFixture, "CheckReadonlyEliminationOnSsaValues")
 {
+    numberBlocksWithoutClasses();
+
     CHECK_EQ(
         "\n" + getCodegenAssembly(
                    R"(
@@ -3111,6 +3119,7 @@ bb_linear_15:
 
 TEST_CASE_FIXTURE(LoweringFixture, "CheckNoMetatableEliminationOnSsaValues")
 {
+    numberBlocksWithoutClasses();
     ensureVectorSize3();
 
     CHECK_EQ(
@@ -3166,6 +3175,7 @@ bb_linear_15:
 
 TEST_CASE_FIXTURE(LoweringFixture, "CheckNoMetatableSsaElim")
 {
+    numberBlocksWithoutClasses();
     ensureVectorSize3();
 
     CHECK_EQ(
@@ -3759,6 +3769,7 @@ end
 
 TEST_CASE_FIXTURE(LoweringFixture, "ResolveVectorNamecalls")
 {
+    numberBlocksWithoutClasses();
     ensureVectorFloat();
 
     CHECK_EQ(
@@ -8078,6 +8089,7 @@ bb_linear_9:
 
 TEST_CASE_FIXTURE(LoweringFixture, "TableOperationTagSuggestion2")
 {
+    numberBlocksWithoutClasses();
     ScopedFastFlag callFb{FFlag::LuauCallFeedback, true};
     ScopedFastFlag emitCallFb{FFlag::LuauEmitCallFeedback, true};
 
@@ -8512,9 +8524,7 @@ bb_bytecode_1:
 
 TEST_CASE_FIXTURE(LoweringFixture, "ClassProvenSelfMemberAccess")
 {
-    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
-    ScopedFastFlag classesRuntime{FFlag::DebugLuauUserDefinedClassesRuntime, true};
-    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     // `self.field` inside a method compiles to GETOBJECTMEMBER/SETOBJECTMEMBER, which lower to a
     // constant-offset address with no slot cache, no class-side bounds check, no name compare and no
@@ -8577,9 +8587,7 @@ bb_4:
 
 TEST_CASE_FIXTURE(LoweringFixture, "ClassesRuntimeKeepsUntypedTableFieldAccessLinear")
 {
-    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
-    ScopedFastFlag classesRuntime{FFlag::DebugLuauUserDefinedClassesRuntime, true};
-    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     // With the classes runtime on, field access on a plain table must compile to the same IR as without it.
     // The object path for untyped receivers must not add a branch in front of the table path (see
@@ -8634,9 +8642,7 @@ bb_linear_17:
 
 TEST_CASE_FIXTURE(LoweringFixture, "ClassIsinstanceKnownTag")
 {
-    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
-    ScopedFastFlag classesRuntime{FFlag::DebugLuauUserDefinedClassesRuntime, true};
-    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     // Inside a method the prologue's CHECKSELFCLASS already establishes that `self` is an object, so
     // constant propagation folds the tag operand of CLASS_ISINSTANCE into a constant; lowering must
@@ -8684,9 +8690,7 @@ bb_bytecode_1:
 
 TEST_CASE_FIXTURE(LoweringFixture, "ClassObjectMemberReadResetsRegisterType")
 {
-    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
-    ScopedFastFlag classesRuntime{FFlag::DebugLuauUserDefinedClassesRuntime, true};
-    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     // GETOBJECTMEMBER R2 (self.nxt) reuses the register that MULK just wrote a number into. The read's
     // result type is unknown, so `.x` on it uses the untyped layout. The table guard misses to the object
@@ -8745,9 +8749,7 @@ bb_linear_10:
 
 TEST_CASE_FIXTURE(LoweringFixture, "ClassConstructionTypesItsRegister")
 {
-    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
-    ScopedFastFlag classesRuntime{FFlag::DebugLuauUserDefinedClassesRuntime, true};
-    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     // NEWOBJECT leaves an object in its target register, so `p.x` goes straight to the object path instead
     // of missing the table guard first.
@@ -8808,9 +8810,7 @@ bb_3:
 
 TEST_CASE_FIXTURE(LoweringFixture, "ClassInlineSiteSelfCheckKeepsBlockLinear")
 {
-    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
-    ScopedFastFlag classesRuntime{FFlag::DebugLuauUserDefinedClassesRuntime, true};
-    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
     ScopedFastFlag trustAnnotations{FFlag::DebugLuwuCompilerTrustsTypeAnnotations, true};
 
     // CHECKSELFCLASS's C operand records `:` syntax for the error message; it is not a skip count, so the
@@ -8903,9 +8903,7 @@ bb_6:
 
 TEST_CASE_FIXTURE(LoweringFixture, "ClassIsinstanceOfKnownNonObjectFolds")
 {
-    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
-    ScopedFastFlag classesRuntime{FFlag::DebugLuauUserDefinedClassesRuntime, true};
-    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     // `x` is a number here, which is never an instance, so the fused test folds to a plain jump.
     CHECK_EQ(
@@ -9156,9 +9154,7 @@ TEST_CASE("ClassLoweringsReserveScratchRegistersBeforeRejoiningBranches")
 
 TEST_CASE_FIXTURE(LoweringFixture, "ReassignedLocalOfOtherTypeIsNotRefined")
 {
-    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
-    ScopedFastFlag classesRuntime{FFlag::DebugLuauUserDefinedClassesRuntime, true};
-    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     // `t` first holds `self` (an object), then whatever `self.nxt` is. Typing it from its first write would
     // guard `t.x` as an object with an exit to the VM, taken on every call where `nxt` is a table.

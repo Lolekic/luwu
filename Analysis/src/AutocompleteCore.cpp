@@ -26,7 +26,7 @@
 
 LUAU_FASTINT(LuauTypeInferIterationLimit)
 LUAU_FASTINT(LuauTypeInferRecursionLimit)
-LUAU_FASTFLAG(LuwuBetterUserDefinedClasses)
+LUAU_FASTFLAG(LuwuClasses)
 LUAU_FASTFLAGVARIABLE(DebugLuauMagicVariableNames)
 LUAU_FASTFLAGVARIABLE(LuauAutocompleteConst)
 LUAU_FASTFLAGVARIABLE(LuauAutocompleteExport)
@@ -2363,12 +2363,11 @@ AutocompleteResult autocomplete_(
     // sub-locations, which would have matched a more specific branch above): offer the
     // qualifiers and the `function` keyword, rather than the generic statement keyword list
     // (most of which -- if/local/for/etc -- aren't valid class members).
-    if (AstStatClass* statClass = node->as<AstStatClass>())
+    if (node->is<AstStatClass>())
     {
         AutocompleteEntryMap ret;
         ret["public"] = {AutocompleteEntryKind::Keyword};
-        if (FFlag::LuwuBetterUserDefinedClasses)
-            ret["private"] = {AutocompleteEntryKind::Keyword};
+        ret["private"] = {AutocompleteEntryKind::Keyword};
         ret["function"] = {AutocompleteEntryKind::Keyword};
         return {std::move(ret), ancestry, AutocompleteContext::Keyword};
     }

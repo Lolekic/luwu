@@ -42,8 +42,7 @@ LUAU_FASTFLAG(DebugLuauMagicTypes)
 LUAU_FASTINTVARIABLE(LuauPrimitiveInferenceInTableLimit, 500)
 LUAU_FASTFLAGVARIABLE(LuauDisallowRedefiningBuiltinTypes)
 LUAU_FASTFLAG(LuauTypeFunctionStructuredErrors)
-LUAU_FASTFLAG(DebugLuauUserDefinedClasses)
-LUAU_FASTFLAG(LuwuBetterUserDefinedClasses)
+LUAU_FASTFLAG(LuwuClasses)
 LUAU_FASTFLAGVARIABLE(LuauTidyTypePrototyping)
 LUAU_FASTFLAGVARIABLE(LuauDoNotEmplaceAnnotatedType)
 LUAU_FASTFLAGVARIABLE(LuauRemovePrimitiveTypeConstraintAndSubtypingUnifier)
@@ -1026,7 +1025,7 @@ void ConstraintGenerator::prototypeTypeDefinitions(const ScopePtr& scope, AstSta
         }
         else if (auto classDecl = stat->as<AstStatClass>())
         {
-            LUAU_ASSERT(FFlag::DebugLuauUserDefinedClasses);
+            LUAU_ASSERT(FFlag::LuwuClasses);
 
             Name declName = classDecl->name->name.value;
             DefId theDef = dfg->getDef(classDecl->name);
@@ -1050,7 +1049,7 @@ void ConstraintGenerator::prototypeTypeDefinitions(const ScopePtr& scope, AstSta
             // generics (e.g. the `T` in `class Box<T> ... end`) resolve correctly. See the
             // equivalent handling for `declare extern type` above.
             ScopePtr defnScope = scope;
-            if (FFlag::LuwuBetterUserDefinedClasses && FFlag::LuwuGenericNominals)
+            if (FFlag::LuwuGenericNominals)
             {
                 defnScope = childScope(classDecl, scope);
                 astClassDefiningScopes[classDecl] = defnScope;
@@ -1065,7 +1064,7 @@ void ConstraintGenerator::prototypeTypeDefinitions(const ScopePtr& scope, AstSta
             TableType::Props instanceMetatableProps;
             DenseHashMap<AstName, TypeId> memberTypes{AstName{""}};
             DenseHashMap<AstName, TypeId> classValueMethodTypes{AstName{""}};
-            const bool isGenericClass = FFlag::LuwuBetterUserDefinedClasses && FFlag::LuwuGenericNominals &&
+            const bool isGenericClass = FFlag::LuwuGenericNominals &&
                                         (classDecl->generics.size != 0 || classDecl->genericPacks.size != 0);
             // Names of `props` entries that are actual fields (AstClassProperty), not methods.
             // See ClassFieldUserData's doc comment for why this needs tracking separately.
@@ -1112,7 +1111,7 @@ void ConstraintGenerator::prototypeTypeDefinitions(const ScopePtr& scope, AstSta
                             // we'll ICE or misbehave.
                             p = Property::rw(propertyType);
                             p.location = classProp.nameLocation;
-                            if (FFlag::DebugLuauUserDefinedClasses && FFlag::LuwuBetterUserDefinedClasses)
+                            if (FFlag::LuwuClasses)
                             {
                                 p.isPrivate = classProp.visibility == AstClassMemberVisibility::Private;
                                 p.isConst = classProp.isConst;
@@ -1143,7 +1142,7 @@ void ConstraintGenerator::prototypeTypeDefinitions(const ScopePtr& scope, AstSta
 
                             auto prop = Property::readonly(propertyType);
                             prop.location = method.nameLocation;
-                            if (FFlag::DebugLuauUserDefinedClasses && FFlag::LuwuBetterUserDefinedClasses)
+                            if (FFlag::LuwuClasses)
                                 prop.isPrivate = method.visibility == AstClassMemberVisibility::Private;
                             // Luwu Classes (rfcs/classes): an instance method is also readable through the
                             // class value, with the same type (`self` is the object type): `Cls.method(obj)`
@@ -1195,7 +1194,7 @@ void ConstraintGenerator::prototypeTypeDefinitions(const ScopePtr& scope, AstSta
                     p = Property::rw(propertyType);
                     p.location = param->location;
 
-                    if (FFlag::DebugLuauUserDefinedClasses && FFlag::LuwuBetterUserDefinedClasses &&
+                    if (FFlag::LuwuClasses &&
                         classDecl->primaryConstructor->argsQualifiers.size == classDecl->primaryConstructor->args.size)
                     {
                         const AstClassPrimaryConstructorParamQualifiers& qualifiers = classDecl->primaryConstructor->argsQualifiers.data[i];
@@ -1225,7 +1224,7 @@ void ConstraintGenerator::prototypeTypeDefinitions(const ScopePtr& scope, AstSta
 
             std::vector<GenericTypeDefinition> classTypeParams;
             std::vector<GenericTypePackDefinition> classTypePackParams;
-            if (FFlag::LuwuBetterUserDefinedClasses && FFlag::LuwuGenericNominals)
+            if (FFlag::LuwuGenericNominals)
             {
                 for (const auto& [name, gen] : createGenerics(defnScope, classDecl->generics, /* useCache */ true, /* addTypes */ false))
                     classTypeParams.push_back(gen);
@@ -1568,7 +1567,7 @@ ControlFlow ConstraintGenerator::visit(const ScopePtr& scope, AstStat* stat)
         return visit(scope, s);
     else if (auto s = stat->as<AstStatClass>())
     {
-        LUAU_ASSERT(FFlag::DebugLuauUserDefinedClasses);
+        LUAU_ASSERT(FFlag::LuwuClasses);
         return visit(scope, s);
     }
     else if (auto s = stat->as<AstStatError>())
@@ -2727,7 +2726,7 @@ ControlFlow ConstraintGenerator::visit(const ScopePtr& scope, AstStatDeclareFunc
 
 ControlFlow ConstraintGenerator::visit(const ScopePtr& scope, AstStatClass* statClass)
 {
-    LUAU_ASSERT(FFlag::DebugLuauUserDefinedClasses);
+    LUAU_ASSERT(FFlag::LuwuClasses);
 
     auto* classDeclRecordPtr = classDeclRecords.find(statClass->name);
     // TODO CLI-199124: This is unpopulated in fragment autocomplete.
@@ -2740,7 +2739,7 @@ ControlFlow ConstraintGenerator::visit(const ScopePtr& scope, AstStatClass* stat
     // (rather than the enclosing scope), so that references to the class's own generics (e.g. the
     // `T` in `class Box<T> ... end`) resolve to these type-level generics.
     ScopePtr bodyScope = scope;
-    if (FFlag::LuwuBetterUserDefinedClasses && FFlag::LuwuGenericNominals)
+    if (FFlag::LuwuGenericNominals)
     {
         if (ScopePtr* defnScopePtr = astClassDefiningScopes.find(statClass))
             bodyScope = *defnScopePtr;
@@ -2894,7 +2893,7 @@ ControlFlow ConstraintGenerator::visit(const ScopePtr& scope, AstStatClass* stat
 
                     if (method.functionName == "__init")
                     {
-                        if (FFlag::DebugLuauUserDefinedClasses && FFlag::LuwuBetterUserDefinedClasses)
+                        if (FFlag::LuwuClasses)
                         {
                             if (ExternType* classInstanceEtv = getMutable<ExternType>(follow(classDeclRecord->ty)))
                                 classInstanceEtv->initLocation = method.function->location;
@@ -3368,7 +3367,7 @@ InferencePack ConstraintGenerator::checkExprCall(
 
     Checkpoint argEndCheckpoint = checkpoint(this);
 
-    if (FFlag::DebugLuauUserDefinedClasses)
+    if (FFlag::LuwuClasses)
     {
         if (auto instanceGuard = matchIsInstanceGuard(*call, dfg))
         {
@@ -3751,7 +3750,7 @@ Inference ConstraintGenerator::check(const ScopePtr& scope, AstExprGlobal* globa
     // reads its own name through a loop phi. Returning its binding there would give it its own
     // still-unsolved type, which blocks every call made with the result ("outstanding free or
     // blocked type in function call").
-    if (FFlag::DebugLuauUserDefinedClasses && get<Phi>(def) && classGlobalNames.contains(global->name))
+    if (FFlag::LuwuClasses && get<Phi>(def) && classGlobalNames.contains(global->name))
     {
         if (auto ty = scope->lookup(global->name))
             return Inference{*ty, refinementArena.proposition(key, builtinTypes->truthyType)};
@@ -4534,7 +4533,7 @@ ConstraintGenerator::FunctionSignature ConstraintGenerator::checkFunctionSignatu
     std::optional<Location> originalName
 )
 {
-    LUAU_ASSERT(FFlag::DebugLuauUserDefinedClasses || enclosingClass == nullptr);
+    LUAU_ASSERT(FFlag::LuwuClasses || enclosingClass == nullptr);
     ScopePtr signatureScope = nullptr;
     ScopePtr bodyScope = nullptr;
     TypePackId returnType = nullptr;
@@ -4611,7 +4610,7 @@ ConstraintGenerator::FunctionSignature ConstraintGenerator::checkFunctionSignatu
     bool hasExplicitSelf;
     bool hasSelf;
 
-    if (FFlag::DebugLuauUserDefinedClasses)
+    if (FFlag::LuwuClasses)
     {
         hasExplicitSelf = enclosingClass != nullptr && fn->args.size > 0 && fn->args.data[0]->name == "self";
         hasSelf = hasExplicitSelf || fn->self != nullptr;
@@ -4655,7 +4654,7 @@ ConstraintGenerator::FunctionSignature ConstraintGenerator::checkFunctionSignatu
 
     for (size_t i = 0; i < fn->args.size; ++i)
     {
-        if (FFlag::DebugLuauUserDefinedClasses)
+        if (FFlag::LuwuClasses)
         {
             if (hasExplicitSelf && i == 0)
             {
@@ -4802,7 +4801,7 @@ ConstraintGenerator::FunctionSignature ConstraintGenerator::checkFunctionSignatu
     actualFunction.generics = std::move(genericTypes);
     actualFunction.genericPacks = std::move(genericTypePacks);
     actualFunction.argNames = std::move(argNames);
-    actualFunction.hasSelf = FFlag::DebugLuauUserDefinedClasses ? hasSelf : fn->self != nullptr;
+    actualFunction.hasSelf = FFlag::LuwuClasses ? hasSelf : fn->self != nullptr;
 
     FunctionDefinition defn;
     defn.definitionModuleName = module->name;
@@ -4872,7 +4871,7 @@ TypeId ConstraintGenerator::resolveReferenceType(
     // `class` is bound as the zero-parameter top type of all classes (GlobalTypes.cpp), so the
     // applied form `class<Cat>` can't be registered as an ordinary builtin type function without
     // clobbering that binding. Route it to the type function here and leave bare `class` alone.
-    if (FFlag::DebugLuauUserDefinedClasses && !ref->prefix.has_value() && ref->name == "class" && ref->hasParameterList)
+    if (FFlag::LuwuClasses && !ref->prefix.has_value() && ref->name == "class" && ref->hasParameterList)
     {
         if (ref->parameters.size != 1 || !ref->parameters.data[0].type)
         {

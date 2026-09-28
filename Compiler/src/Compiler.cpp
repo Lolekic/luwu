@@ -421,7 +421,7 @@ struct Compiler
         int8_t tableReg = getLocalReg(&exportTableLocal);
         LUAU_ASSERT(tableReg >= 0);
 
-        if (FFlag::DebugLuauUserDefinedClasses)
+        if (FFlag::LuwuClasses)
         {
             for (auto& [classLocal, classReg] : exportedClasses)
             {
@@ -536,7 +536,7 @@ struct Compiler
         // receiver's own class, so `self` is an instance by construction. Only a `.`-call with an
         // explicit receiver (`SomeClass.method(x)`, or a method value called later) gets here, hence
         // `selfCall= false`. Inline sites pass the real spelling; see compileInlinedCall.
-        if (FFlag::DebugLuauUserDefinedClasses)
+        if (FFlag::LuwuClasses)
         {
             if (const SelfClassCheck* selfCheck = classMethodSelfChecks.find(func))
             {
@@ -554,7 +554,7 @@ struct Compiler
         // defaults re-evaluate on every construction (each is ordinary bytecode running inside
         // `__init` itself) with no extra closure or call, and lets `const` fields set here still
         // be reassigned later in the same `__init` body per the class RFC.
-        if (FFlag::DebugLuauUserDefinedClasses)
+        if (FFlag::LuwuClasses)
         {
             if (const std::vector<ClassFieldDefault>* defaults = classInitFieldDefaults.find(func))
             {
@@ -585,7 +585,7 @@ struct Compiler
         bool terminatesEarly = false;
         Location terminationLocation;
 
-        if (FFlag::DebugLuauUserDefinedClasses && atTopLevel())
+        if (FFlag::LuwuClasses && atTopLevel())
             preallocateHoistedClasses(stat);
 
         std::vector<AssertProof> assertProofs;
@@ -754,7 +754,7 @@ struct Compiler
         // Luwu Classes (rfcs/classes): constructing an instance always yields exactly one value,
         // whether it goes through NEWOBJECT or the class's default constructor. Saying so here is what
         // lets `return ClassName(...)` and similar multret positions use the fixed-result path.
-        if (FFlag::DebugLuauUserDefinedClasses && !expr->self && isKnownClassExpr(expr->func))
+        if (FFlag::LuwuClasses && !expr->self && isKnownClassExpr(expr->func))
             return false;
 
         // handles builtin calls that can't be constant-folded but are known to return one value
@@ -1042,7 +1042,7 @@ struct Compiler
         // into a class, or from a class to outside, gives that one shared proto the wrong `ownerclass`. The
         // wrong stamp applies everywhere the proto is used, not just at this call site. For example, a free
         // function's inner closure would get private access to the class it was inlined into, from any caller.
-        if (FFlag::DebugLuauUserDefinedClasses && currentFunction && lexicalClassOf(func) != lexicalClassOf(currentFunction) &&
+        if (FFlag::LuwuClasses && currentFunction && lexicalClassOf(func) != lexicalClassOf(currentFunction) &&
             functionContainsNestedFunctions(func))
         {
             bytecode.addDebugRemark("inlining failed: nested function would change class ownership");
@@ -1051,7 +1051,7 @@ struct Compiler
 
         // Luwu Classes (rfcs/classes): a `const` field may be written only by its class's `__init`, checked against
         // the running closure. Inlined into `__init`, another function's write would pass that check.
-        if (FFlag::DebugLuauUserDefinedClasses && currentFunction)
+        if (FFlag::LuwuClasses && currentFunction)
         {
             if (AstStatClass* initClass = classOfInit(currentFunction); initClass && bodyMayWriteConstMember(func, initClass))
             {
@@ -1227,7 +1227,7 @@ struct Compiler
     // runtime hasn't checked.
     AstStatClass* provenSelfClass(AstExpr* recv)
     {
-        if (!FFlag::DebugLuauUserDefinedClasses || !currentFunction)
+        if (!FFlag::LuwuClasses || !currentFunction)
             return nullptr;
 
         if (AstStatClass* inlined = inlineProvenSelfClass(recv))
@@ -1352,7 +1352,7 @@ struct Compiler
     // the region can write the local (matchIsinstanceProvenLocal, matchAssertIsinstanceProof).
     AstStatClass* provenIsinstanceClass(AstExpr* recv)
     {
-        if (!FFlag::DebugLuauUserDefinedClasses || !currentFunction)
+        if (!FFlag::LuwuClasses || !currentFunction)
             return nullptr;
 
         AstExprLocal* le = recv->as<AstExprLocal>();
@@ -1440,7 +1440,7 @@ struct Compiler
     {
         owner = nullptr;
 
-        if (FFlag::DebugLuauUserDefinedClasses)
+        if (FFlag::LuwuClasses)
             if (AstStatClass** cls = classMethodOwner.find(func); cls && *cls)
                 owner = (*cls)->name->name.value;
 
@@ -2102,7 +2102,7 @@ struct Compiler
 
         AstStatClass** selfProvenClass = nullptr;
 
-        if (FFlag::DebugLuauUserDefinedClasses && func->args.size > 0)
+        if (FFlag::LuwuClasses && func->args.size > 0)
         {
             // At O2 an inlined method body can receive a `self` of a class other than the method's, which this check rejects.
             // This can be because `self` is annotated incorrectly or in the more common case that the wrong type of `self` was passed to a free function
@@ -3316,7 +3316,7 @@ struct Compiler
         }
 
         // Luwu Classes (rfcs/classes): construct instances of a statically known class inline
-        if (FFlag::DebugLuauUserDefinedClasses && !expr->self && !multRet && targetCount == 1)
+        if (FFlag::LuwuClasses && !expr->self && !multRet && targetCount == 1)
         {
             if (tryCompileNewObject(expr, target))
                 return;
@@ -3324,7 +3324,7 @@ struct Compiler
 
         // Luwu Classes (rfcs/classes): inline `obj:method()` calls whose receiver class is
         // statically known and whose body can be inlined here (see tryResolveMethodCall).
-        if (options.optimizationLevel >= 2 && expr->self && FFlag::DebugLuauUserDefinedClasses)
+        if (options.optimizationLevel >= 2 && expr->self && FFlag::LuwuClasses)
         {
             if (AstExprFunction* mfunc = tryResolveMethodCall(expr))
             {
@@ -3665,7 +3665,7 @@ struct Compiler
 
     void compileClassDeclaration(AstStatClass* decl)
     {
-        LUAU_ASSERT(FFlag::DebugLuauUserDefinedClasses);
+        LUAU_ASSERT(FFlag::LuwuClasses);
 
         // CLI-194693: We probably need to add something here to prevent:
         //
@@ -4077,7 +4077,7 @@ struct Compiler
     // may fuse, or null. Only a fused assert is followed by the recheck that makes it a proof.
     AstExprCall* fusableAssertIsinstance(AstExprCall* call)
     {
-        if (!FFlag::DebugLuauUserDefinedClasses)
+        if (!FFlag::LuwuClasses)
             return nullptr;
 
         const int* bfid = builtins.find(call);
@@ -4139,7 +4139,7 @@ struct Compiler
     // compileConditionValue below.
     bool tryCompileConditionIsinstance(AstExprCall* call, const uint8_t* target, std::vector<size_t>& skipJump, bool onlyTruth)
     {
-        if (!FFlag::DebugLuauUserDefinedClasses)
+        if (!FFlag::LuwuClasses)
             return false;
 
         const int* bfid = builtins.find(call);
@@ -4243,7 +4243,7 @@ struct Compiler
     // from it additionally requires a region no write can cross -- see the two callers.
     AstStatClass* matchIsinstanceCall(AstExpr* expr, AstLocal*& local)
     {
-        if (!FFlag::DebugLuauUserDefinedClasses || !currentFunction)
+        if (!FFlag::LuwuClasses || !currentFunction)
             return nullptr;
 
         while (AstExprGroup* group = expr->as<AstExprGroup>())
@@ -4313,7 +4313,7 @@ struct Compiler
     // way a write inside a then-body does.
     AstStatClass* matchAssertIsinstanceProof(AstStat* stat, const AstArray<AstStat*>& body, size_t index, AstLocal*& local)
     {
-        if (!FFlag::DebugLuauUserDefinedClasses)
+        if (!FFlag::LuwuClasses)
             return nullptr;
 
         AstStatExpr* statExpr = stat->as<AstStatExpr>();
@@ -5316,7 +5316,7 @@ struct Compiler
             import1 = expr;
         }
 
-        if (importRoot && canImportChain(importRoot) && !(FFlag::DebugLuauUserDefinedClasses && classLocals.contains(importRoot->name)))
+        if (importRoot && canImportChain(importRoot) && !(FFlag::LuwuClasses && classLocals.contains(importRoot->name)))
         {
             int32_t id0 = bytecode.addConstantString(sref(importRoot->name));
             int32_t id1 = bytecode.addConstantString(sref(import1->index));
@@ -5421,7 +5421,7 @@ struct Compiler
 
     void compileExprGlobal(AstExprGlobal* expr, uint8_t target)
     {
-        if (FFlag::DebugLuauUserDefinedClasses)
+        if (FFlag::LuwuClasses)
         {
             if (AstLocal** local = classLocals.find(expr->name))
             {
@@ -5906,7 +5906,7 @@ struct Compiler
         }
         else if (AstExprGlobal* expr = node->as<AstExprGlobal>())
         {
-            if (FFlag::DebugLuauUserDefinedClasses)
+            if (FFlag::LuwuClasses)
             {
                 if (AstLocal** classLocal = classLocals.find(expr->name))
                     CompileError::raise(
@@ -6047,7 +6047,7 @@ struct Compiler
 
             return l && l->allocated ? l->reg : -1;
         }
-        else if (FFlag::DebugLuauUserDefinedClasses)
+        else if (FFlag::LuwuClasses)
         {
             if (AstExprGlobal* g = node->as<AstExprGlobal>())
             {
@@ -7232,7 +7232,7 @@ struct Compiler
         {
             // do nothing
         }
-        else if (FFlag::DebugLuauUserDefinedClasses && node->is<AstStatClass>())
+        else if (FFlag::LuwuClasses && node->is<AstStatClass>())
         {
             compileClassDeclaration(node->as<AstStatClass>());
         }
@@ -7272,7 +7272,7 @@ struct Compiler
 
     void preallocateHoistedClasses(AstStatBlock* body)
     {
-        LUAU_ASSERT(FFlag::DebugLuauUserDefinedClasses);
+        LUAU_ASSERT(FFlag::LuwuClasses);
 
         for (AstStat* stat : body->body)
         {
@@ -8437,7 +8437,7 @@ void compileOrThrow(BytecodeBuilder& bytecode, const ParseResult& parseResult, A
     // constructor implies); must outlive the `functions` compile loop below.
     Allocator classSynthesisAllocator;
 
-    if (FFlag::DebugLuauUserDefinedClasses)
+    if (FFlag::LuwuClasses)
     {
         Compiler::ClassInitDefaultsVisitor classInitDefaultsVisitor(
             classSynthesisAllocator,

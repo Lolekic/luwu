@@ -21,7 +21,7 @@ LUAU_DYNAMIC_FASTINT(LuauTypeFamilyApplicationCartesianProductLimit)
 LUAU_DYNAMIC_FASTINTVARIABLE(LuauStepRefineRecursionLimit, 64)
 
 LUAU_FASTFLAGVARIABLE(LuauConcatDoesntAlwaysReturnString)
-LUAU_FASTFLAG(DebugLuauUserDefinedClasses)
+LUAU_FASTFLAG(LuwuClasses)
 LUAU_FASTFLAG(LuauRemovePrimitiveTypeConstraintAndSubtypingUnifier)
 LUAU_FASTFLAG(LuauRemoveExtraSubtypingInstances)
 
@@ -2525,7 +2525,7 @@ TypeFunctionReductionResult<TypeId> objectofTypeFunction(
     NotNull<TypeFunctionContext> ctx
 )
 {
-    LUAU_ASSERT(FFlag::DebugLuauUserDefinedClasses);
+    LUAU_ASSERT(FFlag::LuwuClasses);
     if (typeParams.size() != 1 || !packParams.empty())
     {
         ctx->ice->ice("objectof type function: encountered a type function instance without the required argument structure");
@@ -2617,7 +2617,7 @@ TypeFunctionReductionResult<TypeId> classTypeFunction(
     NotNull<TypeFunctionContext> ctx
 )
 {
-    LUAU_ASSERT(FFlag::DebugLuauUserDefinedClasses);
+    LUAU_ASSERT(FFlag::LuwuClasses);
     if (typeParams.size() != 1 || !packParams.empty())
     {
         ctx->ice->ice("class type function: encountered a type function instance without the required argument structure");

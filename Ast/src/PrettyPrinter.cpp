@@ -10,7 +10,7 @@
 #include <limits>
 #include <math.h>
 
-LUAU_FASTFLAG(DebugLuauUserDefinedClasses)
+LUAU_FASTFLAG(LuwuClasses)
 LUAU_FASTFLAG(LuauExportValueSyntax)
 
 LUAU_FASTFLAG(LuauCstAttr)
@@ -1385,7 +1385,7 @@ struct Printer
             writer.symbol(":");
             visualizeTypeAnnotation(*a->type);
         }
-        else if (const auto& c = program.as<AstStatClass>(); c && FFlag::DebugLuauUserDefinedClasses)
+        else if (const auto& c = program.as<AstStatClass>(); c && FFlag::LuwuClasses)
         {
             if (c->exported)
                 writer.keyword("export");

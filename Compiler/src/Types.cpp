@@ -4,7 +4,7 @@
 #include "Luau/BytecodeBuilder.h"
 
 LUAU_FASTFLAG(LuauIntegerFastcalls)
-LUAU_FASTFLAG(DebugLuauUserDefinedClasses)
+LUAU_FASTFLAG(LuwuClasses)
 
 namespace Luau
 {
@@ -40,9 +40,9 @@ static LuauBytecodeType getPrimitiveType(AstName name)
         return LBC_TYPE_SYMNONE;
     // Luwu Classes (rfcs/classes): the class tags are Luwu bytecode version 200 (see Bytecode.h), so they are only
     // emitted while classes are. Without classes these are ordinary type names, as they are upstream.
-    else if (FFlag::DebugLuauUserDefinedClasses && name == "class")
+    else if (FFlag::LuwuClasses && name == "class")
         return LBC_TYPE_CLASS;
-    else if (FFlag::DebugLuauUserDefinedClasses && name == "object")
+    else if (FFlag::LuwuClasses && name == "object")
         return LBC_TYPE_OBJECT;
     else if (name == "any" || name == "unknown")
         return LBC_TYPE_ANY;

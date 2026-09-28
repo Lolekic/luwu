@@ -9,7 +9,7 @@
 
 LUAU_FASTFLAG(DebugLuauForceOldSolver)
 LUAU_FASTFLAG(DebugLuwuCompilerTrustsTypeAnnotations)
-LUAU_FASTFLAG(DebugLuauUserDefinedClasses)
+LUAU_FASTFLAG(LuwuClasses)
 LUAU_FASTFLAG(LuauDeprecatedAttributeOnAnonymousFunctions)
 LUAU_FASTFLAG(LuauFunctionUnusedRecursiveLinting)
 LUAU_FASTFLAG(LuwuTableRemoveFootgunLint)
@@ -371,7 +371,7 @@ return bar()
 
 TEST_CASE_FIXTURE(Fixture, "LocalShadowClass")
 {
-    ScopedFastFlag sff{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     // Two locals shadow the class and are reported. The one before the class hides it from the rest of
     // the module, and the one in a function hides it from the rest of that function. Neither `local cat`
@@ -404,7 +404,7 @@ return before, f, cat
 
 TEST_CASE_FIXTURE(Fixture, "LocalShadowClassAfterTheClass")
 {
-    ScopedFastFlag sff{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     LintResult result = lint(R"(
 class Cat

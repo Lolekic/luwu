@@ -6,7 +6,7 @@
 #include <stdlib.h>
 
 LUAU_FASTFLAG(LuauIntegerLibrary)
-LUAU_FASTFLAG(DebugLuauUserDefinedClassesRuntime)
+LUAU_FASTFLAG(LuwuClasses)
 
 static const luaL_Reg lualibs[] = {
     {"", luaopen_base},
@@ -54,7 +54,7 @@ void luaL_openlibs(lua_State* L)
         lua_call(L, 1, 0);
     }
 
-    if (FFlag::DebugLuauUserDefinedClassesRuntime)
+    if (FFlag::LuwuClasses)
     {
         lua_pushcfunction(L, luaopen_class, NULL);
         lua_pushstring(L, LUA_CLASSLIBNAME);

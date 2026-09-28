@@ -9,7 +9,7 @@
 #include <optional>
 #include <utility>
 
-LUAU_FASTFLAG(DebugLuauUserDefinedClasses)
+LUAU_FASTFLAG(LuwuClasses)
 
 namespace Luau
 {
@@ -1065,7 +1065,7 @@ struct BytecodeGraphParser
             }
 
             case LOP_NEWCLASSMEMBER:
-                LUAU_ASSERT(FFlag::DebugLuauUserDefinedClasses);
+                LUAU_ASSERT(FFlag::LuwuClasses);
                 addVmRegInput(node, LUAU_INSN_A(insn));
                 addVmRegInput(node, LUAU_INSN_C(insn));
                 addVmConstInput(node, aux);

@@ -456,7 +456,7 @@ void synthesizeExportReturn(NotNull<BuiltinTypes> builtinTypes, NotNull<Module> 
                 props[exprLocal->local->name.value].location = exprLocal->local->location;
             }
         }
-        else if (FFlag::DebugLuauUserDefinedClasses)
+        else if (FFlag::LuwuClasses)
         {
             if (AstStatClass* classStat = statement->as<AstStatClass>())
             {

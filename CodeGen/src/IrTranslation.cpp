@@ -15,7 +15,7 @@
 LUAU_FASTFLAG(LuauCodegenInteger3)
 LUAU_FASTFLAGVARIABLE(LuauCodegenBuilinDeadRange)
 LUAU_FASTFLAG(LuauBackedgeHeapCheck)
-LUAU_FASTFLAG(DebugLuauUserDefinedClassesRuntime)
+LUAU_FASTFLAG(LuwuClasses)
 
 namespace Luau
 {
@@ -1846,7 +1846,7 @@ void translateInstGetTableKS(IrBuilder& build, const Instruction* pc, int pcpos)
     // When a check in the object path fails, it jumps to the instruction's generic fallback. Liveness
     // analysis ignores that fallback-to-fallback edge because both blocks belong to the same instruction
     // (see computeCfgLiveInOutRegSets).
-    bool objectSpeculation = FFlag::DebugLuauUserDefinedClassesRuntime && bcTypes.a == LBC_TYPE_ANY;
+    bool objectSpeculation = FFlag::LuwuClasses && bcTypes.a == LBC_TYPE_ANY;
 
     IrOp fallback = build.fallbackBlock(pcpos);
     IrOp objBlock = objectSpeculation ? build.fallbackBlock(pcpos) : fallback;
@@ -2017,7 +2017,7 @@ void translateInstSetTableKS(IrBuilder& build, const Instruction* pc, int pcpos)
     }
 
     // Unknown receiver (ANY): same layout as translateInstGetTableKS, see the comment there.
-    bool objectSpeculation = FFlag::DebugLuauUserDefinedClassesRuntime && bcTypes.a == LBC_TYPE_ANY;
+    bool objectSpeculation = FFlag::LuwuClasses && bcTypes.a == LBC_TYPE_ANY;
 
     IrOp fallback = build.fallbackBlock(pcpos);
     IrOp objBlock = objectSpeculation ? build.fallbackBlock(pcpos) : fallback;
@@ -2235,7 +2235,7 @@ bool translateInstNamecall(IrBuilder& build, const Instruction* pc, int pcpos)
 
     // Unknown receiver (ANY): same layout as translateInstGetTableKS, see the comment there. Many method
     // calls on objects have receivers the compiler can't type, such as a value read out of a table.
-    bool objectSpeculation = FFlag::DebugLuauUserDefinedClassesRuntime && bcTypes.a == LBC_TYPE_ANY;
+    bool objectSpeculation = FFlag::LuwuClasses && bcTypes.a == LBC_TYPE_ANY;
     IrOp objBlock = objectSpeculation ? build.fallbackBlock(pcpos) : fallback;
 
     IrOp firstFastPathSuccess = build.block(IrBlockKind::Internal);

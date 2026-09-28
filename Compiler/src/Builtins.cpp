@@ -9,7 +9,7 @@
 
 LUAU_FASTFLAGVARIABLE(LuauIntegerFastcalls)
 LUAU_FASTFLAGVARIABLE(LuauIntegerBufferFastcalls)
-LUAU_FASTFLAG(DebugLuauUserDefinedClasses)
+LUAU_FASTFLAG(LuwuClasses)
 LUAU_FASTFLAG(LuwuBufferIsFrozen)
 
 namespace Luau
@@ -391,7 +391,7 @@ static int getBuiltinFunctionId(const Builtin& builtin, const CompileOptions& op
     // turns the per-branch dispatch (`if class.isinstance(node, Foo)`) from a full call into an inline
     // object-class comparison. The FASTCALL safe-env guard falls back to the real call if `class`
     // isn't the class library, so this stays correct even when the classes feature is disabled.
-    if (FFlag::DebugLuauUserDefinedClasses && builtin.isMethod("class", "isinstance"))
+    if (FFlag::LuwuClasses && builtin.isMethod("class", "isinstance"))
         return LBF_CLASS_ISINSTANCE;
 
     return -1;

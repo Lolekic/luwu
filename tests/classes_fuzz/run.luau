@@ -32,9 +32,7 @@ local gen = require("./gen")
 
 const FLAGS = "--fflags="
     .. table.concat({
-        "DebugLuauUserDefinedClasses=true",
-        "DebugLuauUserDefinedClassesRuntime=true",
-        "LuwuBetterUserDefinedClasses=true",
+        "LuwuClasses=true",
         "LuwuGenericNominals=true",
         "LuauExportValueSyntax=true",
         "LuwuExportedClassIsNilWorkaround=true",

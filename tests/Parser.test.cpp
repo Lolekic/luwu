@@ -20,8 +20,7 @@ LUAU_DYNAMIC_FASTFLAG(DebugLuauReportReturnTypeVariadicWithTypeSuffix)
 LUAU_FASTFLAG(LuauExportValueSyntax)
 LUAU_FASTFLAG(DebugLuauNoInline)
 LUAU_FASTFLAG(LuauIntegerType2)
-LUAU_FASTFLAG(DebugLuauUserDefinedClasses)
-LUAU_FASTFLAG(LuwuBetterUserDefinedClasses)
+LUAU_FASTFLAG(LuwuClasses)
 LUAU_FASTFLAG(LuauAllowGlobalDeclarationToBeCalledClass)
 LUAU_FASTFLAG(LuauTrackPrefixLocal)
 LUAU_FASTFLAG(LuwuDefaultArguments)
@@ -3664,7 +3663,7 @@ TEST_CASE_FIXTURE(Fixture, "const_shadow")
 
 TEST_CASE_FIXTURE(Fixture, "class_declaration")
 {
-    ScopedFastFlag _{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag _{FFlag::LuwuClasses, true};
 
     ParseResult res = tryParse(R"(
         class Point2
@@ -3709,8 +3708,7 @@ TEST_CASE_FIXTURE(Fixture, "class_declaration")
 TEST_CASE_FIXTURE(Fixture, "class_generics_support_defaults")
 {
     ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
+        {FFlag::LuwuClasses, true},
         {FFlag::LuwuGenericNominals, true},
     };
 
@@ -3738,8 +3736,7 @@ TEST_CASE_FIXTURE(Fixture, "class_generics_support_defaults")
 TEST_CASE_FIXTURE(Fixture, "class_generic_default_must_come_last")
 {
     ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
+        {FFlag::LuwuClasses, true},
         {FFlag::LuwuGenericNominals, true},
     };
 
@@ -3755,10 +3752,7 @@ TEST_CASE_FIXTURE(Fixture, "class_generic_default_must_come_last")
 
 TEST_CASE_FIXTURE(Fixture, "class_all_public_members_can_omit_public_keyword")
 {
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
-    };
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     ParseResult result = tryParse(R"(
         class Vector3
@@ -3783,28 +3777,9 @@ TEST_CASE_FIXTURE(Fixture, "class_all_public_members_can_omit_public_keyword")
     }
 }
 
-TEST_CASE_FIXTURE(Fixture, "class_without_LuwuBetterUserDefinedClasses_still_requires_public_keyword")
-{
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, false},
-    };
-
-    ParseResult result = tryParse(R"(
-        class Vector3
-            x: number
-        end
-    )");
-
-    CHECK(!result.errors.empty());
-}
-
 TEST_CASE_FIXTURE(Fixture, "class_private_member_requires_qualifiers_on_all_members")
 {
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
-    };
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     ParseResult result = tryParse(R"(
         class Vector4
@@ -3820,10 +3795,7 @@ TEST_CASE_FIXTURE(Fixture, "class_private_member_requires_qualifiers_on_all_memb
 
 TEST_CASE_FIXTURE(Fixture, "class_private_member_with_all_qualifiers_present_parses_cleanly")
 {
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
-    };
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     ParseResult result = tryParse(R"(
         class User
@@ -3860,10 +3832,7 @@ TEST_CASE_FIXTURE(Fixture, "class_private_member_with_all_qualifiers_present_par
 
 TEST_CASE_FIXTURE(Fixture, "class_const_property_after_qualifier")
 {
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
-    };
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     ParseResult result = tryParse(R"(
         class Point2
@@ -3895,10 +3864,7 @@ TEST_CASE_FIXTURE(Fixture, "class_const_property_after_qualifier")
 
 TEST_CASE_FIXTURE(Fixture, "class_const_property_implicit_public")
 {
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
-    };
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     ParseResult result = tryParse(R"(
         class Vector3
@@ -3923,10 +3889,7 @@ TEST_CASE_FIXTURE(Fixture, "class_const_property_implicit_public")
 
 TEST_CASE_FIXTURE(Fixture, "class_const_property_without_qualifier_or_type")
 {
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
-    };
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     ParseResult result = tryParse(R"(
         class Vector3
@@ -3947,28 +3910,9 @@ TEST_CASE_FIXTURE(Fixture, "class_const_property_without_qualifier_or_type")
     CHECK(x->ty == nullptr);
 }
 
-TEST_CASE_FIXTURE(Fixture, "class_const_property_without_LuwuBetterUserDefinedClasses_is_rejected")
-{
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, false},
-    };
-
-    ParseResult result = tryParse(R"(
-        class Vector3
-            public const x: number
-        end
-    )");
-
-    CHECK(!result.errors.empty());
-}
-
 TEST_CASE_FIXTURE(Fixture, "class_property_default_value")
 {
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
-    };
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     ParseResult result = tryParse(R"(
         class Cat
@@ -4008,10 +3952,7 @@ TEST_CASE_FIXTURE(Fixture, "class_property_default_value")
 
 TEST_CASE_FIXTURE(Fixture, "class_property_default_value_without_type_annotation")
 {
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
-    };
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     ParseResult result = tryParse(R"(
         class Point
@@ -4033,28 +3974,9 @@ TEST_CASE_FIXTURE(Fixture, "class_property_default_value_without_type_annotation
     CHECK(x->defaultValue->as<AstExprConstantNumber>());
 }
 
-TEST_CASE_FIXTURE(Fixture, "class_property_default_value_without_LuwuBetterUserDefinedClasses_is_rejected")
-{
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, false},
-    };
-
-    ParseResult result = tryParse(R"(
-        class Vector3
-            public x: number = 0
-        end
-    )");
-
-    CHECK(!result.errors.empty());
-}
-
 TEST_CASE_FIXTURE(Fixture, "class_const_before_qualifier_is_a_syntax_error")
 {
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
-    };
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     // `const` is only recognized after the `public`/`private` qualifier (or in front of a bare,
     // implicitly-public name). Writing it the other way around is a dedicated syntax error rather
@@ -4084,10 +4006,7 @@ TEST_CASE_FIXTURE(Fixture, "class_const_before_qualifier_is_a_syntax_error")
 
 TEST_CASE_FIXTURE(Fixture, "class_const_before_private_qualifier_is_a_syntax_error")
 {
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
-    };
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     ParseResult result = tryParse(R"(
         class Vector3
@@ -4101,10 +4020,7 @@ TEST_CASE_FIXTURE(Fixture, "class_const_before_private_qualifier_is_a_syntax_err
 
 TEST_CASE_FIXTURE(Fixture, "class_const_does_not_apply_to_methods")
 {
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
-    };
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     ParseResult result = tryParse(R"(
         class Vector3
@@ -4117,10 +4033,7 @@ TEST_CASE_FIXTURE(Fixture, "class_const_does_not_apply_to_methods")
 
 TEST_CASE_FIXTURE(Fixture, "class_const_and_private_member_qualifier_ambiguity_check_still_applies")
 {
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
-    };
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     ParseResult result = tryParse(R"(
         class Vector4
@@ -4151,7 +4064,7 @@ TEST_CASE_FIXTURE(Fixture, "class_parse_errors")
 
 TEST_CASE_FIXTURE(Fixture, "class_recovery_error_in_property_type")
 {
-    ScopedFastFlag _{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag _{FFlag::LuwuClasses, true};
 
     ParseResult result = tryParse(R"(
 class Foo
@@ -4183,7 +4096,7 @@ end
 
 TEST_CASE_FIXTURE(Fixture, "class_public_function")
 {
-    ScopedFastFlag _{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag _{FFlag::LuwuClasses, true};
 
     ParseResult result = tryParse(R"(
         class Foo
@@ -4196,10 +4109,7 @@ TEST_CASE_FIXTURE(Fixture, "class_public_function")
 
 TEST_CASE_FIXTURE(Fixture, "class_method_attributes")
 {
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
-    };
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     ParseResult result = tryParse(R"(
         class Foo
@@ -4233,10 +4143,7 @@ TEST_CASE_FIXTURE(Fixture, "class_method_attributes")
 
 TEST_CASE_FIXTURE(Fixture, "class_field_cannot_have_attributes")
 {
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
-    };
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     ParseResult result = tryParse(R"(
         class Foo
@@ -4260,10 +4167,7 @@ TEST_CASE_FIXTURE(Fixture, "class_field_cannot_have_attributes")
 
 TEST_CASE_FIXTURE(Fixture, "class_attribute_with_no_member_does_not_swallow_end")
 {
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
-    };
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     ParseResult result = tryParse(R"(
         class Foo
@@ -4284,10 +4188,7 @@ TEST_CASE_FIXTURE(Fixture, "class_attribute_with_no_member_does_not_swallow_end"
 
 TEST_CASE_FIXTURE(Fixture, "class_method_attributes_cannot_straddle_access_specifier")
 {
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
-    };
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     ParseResult result = tryParse(R"(
         class Foo
@@ -4310,20 +4211,18 @@ TEST_CASE_FIXTURE(Fixture, "class_method_attributes_cannot_straddle_access_speci
 
 TEST_CASE_FIXTURE(Fixture, "class_recovery_invalid_body_token")
 {
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, false},
-    };
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     ParseResult result = tryParse(R"(
 class Foo
     public x: number
-    blah
-    function bar() end
+    123
+    public function bar() end
 end
     )");
 
-    REQUIRE(!result.errors.empty());
+    REQUIRE_EQ(result.errors.size(), 1);
+    CHECK_EQ(result.errors[0].getMessage(), "Expected identifier when parsing class field name, got '123'");
 
     REQUIRE_EQ(result.root->body.size, 1);
     const AstStatClass* cls = result.root->body.data[0]->as<AstStatClass>();
@@ -4339,10 +4238,7 @@ end
 
 TEST_CASE_FIXTURE(Fixture, "class_recovery_public_no_name_and_invalid_body_token")
 {
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, false},
-    };
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     ParseResult result = tryParse(R"(
 class Foo
@@ -4384,7 +4280,7 @@ end
 
 TEST_CASE_FIXTURE(Fixture, "duplicate_class_methods")
 {
-    ScopedFastFlag _{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag _{FFlag::LuwuClasses, true};
 
     matchParseError(
         R"(
@@ -4399,7 +4295,7 @@ end
 
 TEST_CASE_FIXTURE(Fixture, "duplicate_unnamed_class_methods")
 {
-    ScopedFastFlag _{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag _{FFlag::LuwuClasses, true};
 
     ParseResult result = tryParse(
         R"(
@@ -4419,8 +4315,7 @@ end
 TEST_CASE_FIXTURE(Fixture, "class_primary_constructor")
 {
     ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
+        {FFlag::LuwuClasses, true},
         // a parameter default is a function parameter default (see parseClassPrimaryConstructor)
         {FFlag::LuwuDefaultArguments, true},
     };
@@ -4453,10 +4348,7 @@ TEST_CASE_FIXTURE(Fixture, "class_primary_constructor")
 
 TEST_CASE_FIXTURE(Fixture, "class_primary_constructor_with_no_parameters")
 {
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
-    };
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     // `class Counter()` is not the same as `class Counter`: the empty parameter list is what takes
     // away the default table constructor (rfcs/classes), so it has to survive parsing.
@@ -4481,10 +4373,7 @@ TEST_CASE_FIXTURE(Fixture, "class_primary_constructor_with_no_parameters")
 
 TEST_CASE_FIXTURE(Fixture, "class_primary_constructor_private")
 {
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
-    };
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     ParseResult result = tryParse(R"(
         class Account private (holder: string)
@@ -4510,10 +4399,7 @@ TEST_CASE_FIXTURE(Fixture, "class_primary_constructor_private")
 
 TEST_CASE_FIXTURE(Fixture, "class_primary_constructor_parameters_are_visible_to_field_initializers")
 {
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
-    };
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     ParseResult result = tryParse(R"(
         class Card(public userid: number, hash: string)
@@ -4542,10 +4428,7 @@ TEST_CASE_FIXTURE(Fixture, "class_primary_constructor_parameters_are_visible_to_
 
 TEST_CASE_FIXTURE(Fixture, "class_primary_constructor_parameters_are_not_visible_to_methods")
 {
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
-    };
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     ParseResult result = tryParse(R"(
         class Symbol(name: string)
@@ -4573,10 +4456,7 @@ TEST_CASE_FIXTURE(Fixture, "class_primary_constructor_parameters_are_not_visible
 
 TEST_CASE_FIXTURE(Fixture, "class_primary_constructor_rejects_explicit_init")
 {
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
-    };
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     matchParseError(
         R"(
@@ -4592,8 +4472,7 @@ end
 TEST_CASE_FIXTURE(Fixture, "class_primary_constructor_parses_qualifiers_on_parameters")
 {
     ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
+        {FFlag::LuwuClasses, true},
         {FFlag::LuwuDefaultArguments, true},
     };
 
@@ -4640,10 +4519,7 @@ end
 
 TEST_CASE_FIXTURE(Fixture, "class_primary_constructor_qualified_parameters_require_qualifiers_everywhere")
 {
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
-    };
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     matchParseError(
         R"(
@@ -4682,8 +4558,7 @@ end
 TEST_CASE_FIXTURE(Fixture, "class_body_may_not_contradict_qualified_parameters")
 {
     ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
+        {FFlag::LuwuClasses, true},
         {FFlag::LuwuDefaultArguments, true},
     };
 
@@ -4725,10 +4600,7 @@ end
 
 TEST_CASE_FIXTURE(Fixture, "class_may_not_mix_explicit_and_implicit_public")
 {
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
-    };
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     matchParseError(
         R"(
@@ -4763,10 +4635,7 @@ end
 
 TEST_CASE_FIXTURE(Fixture, "class_primary_constructor_rejects_duplicate_parameters")
 {
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
-    };
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     matchParseError(
         R"(
@@ -4779,10 +4648,7 @@ end
 
 TEST_CASE_FIXTURE(Fixture, "class_primary_constructor_parameter_collides_with_method")
 {
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
-    };
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     // a parameter declares a field of the same name, so a method may not reuse it -- but a *property*
     // of the same name may, since that is how access specifiers get applied to a parameter's field
@@ -4798,10 +4664,7 @@ end
 
 TEST_CASE_FIXTURE(Fixture, "class_primary_constructor_rejects_trailing_comma")
 {
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
-    };
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     matchParseError(
         R"(
@@ -4814,10 +4677,7 @@ end
 
 TEST_CASE_FIXTURE(Fixture, "class_missing_end_is_reported_as_such")
 {
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
-    };
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     // A class body and a statement list overlap (`const t0 = os.clock()` is valid as either), so a
     // class missing its `end` used to swallow everything after it and then report a pile of nonsense
@@ -4837,10 +4697,7 @@ print(t0)
 
 TEST_CASE_FIXTURE(Fixture, "unterminated_class_location_ends_before_the_next_statement")
 {
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
-    };
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     ParseResult result = tryParse(R"(
 class Pod
@@ -4873,10 +4730,7 @@ TEST_CASE_FIXTURE(Fixture, "local_function_expr_location_starts_at_function")
 
 TEST_CASE_FIXTURE(Fixture, "class_method_self_is_const")
 {
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
-    };
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     const char* writes[] = {
         "self = nil",
@@ -4937,10 +4791,7 @@ end
 
 TEST_CASE_FIXTURE(Fixture, "class_primary_constructor_rejects_variadic")
 {
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
-    };
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     matchParseError(
         R"(
@@ -4953,7 +4804,7 @@ end
 
 TEST_CASE_FIXTURE(Fixture, "overlapping_property_and_method_names")
 {
-    ScopedFastFlag _{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag _{FFlag::LuwuClasses, true};
 
     matchParseError(
         R"(
@@ -4968,7 +4819,7 @@ end
 
 TEST_CASE_FIXTURE(Fixture, "reassigned_class")
 {
-    ScopedFastFlag _{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag _{FFlag::LuwuClasses, true};
     ScopedFastFlag exportFlag{FFlag::LuauExportValueSyntax, true};
 
     matchParseError(
@@ -4982,7 +4833,7 @@ Animal = nil
 
 TEST_CASE_FIXTURE(Fixture, "class_method_missing_end_error")
 {
-    ScopedFastFlag _{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag _{FFlag::LuwuClasses, true};
 
     matchParseError(
         R"(
@@ -4994,31 +4845,9 @@ TEST_CASE_FIXTURE(Fixture, "class_method_missing_end_error")
     );
 }
 
-TEST_CASE_FIXTURE(Fixture, "classes_can_only_have_functions_and_properties")
-{
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, false},
-    };
-
-    matchParseError(
-        R"(
-        class Bicycle
-            while true do
-                cycle()
-            end
-        end
-    )",
-        "Only class fields and functions can be declared within a class"
-    );
-}
-
 TEST_CASE_FIXTURE(Fixture, "class_declaration_is_luwu_only")
 {
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
-    };
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     ParseResult result = tryParse(R"(
         class Cat
@@ -5047,10 +4876,7 @@ TEST_CASE_FIXTURE(Fixture, "class_declaration_is_luwu_only")
 
 TEST_CASE_FIXTURE(Fixture, "class_extends_is_rejected")
 {
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
-    };
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     // no inheritance: `extends` gets its own error rather than parsing as two bare fields
     ParseResult result = tryParse(R"(
@@ -5075,10 +4901,7 @@ TEST_CASE_FIXTURE(Fixture, "class_extends_is_rejected")
 
 TEST_CASE_FIXTURE(Fixture, "class_implements_is_rejected")
 {
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
-    };
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     // `implements` is reserved for traits; one error for the whole interface list
     ParseResult result = tryParse(R"(
@@ -5093,10 +4916,7 @@ TEST_CASE_FIXTURE(Fixture, "class_implements_is_rejected")
 
 TEST_CASE_FIXTURE(Fixture, "class_members_may_not_be_named_after_keywords")
 {
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
-    };
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     // rfcs/classes: `class`, `public`, `private`, `const`, `extends` and `implements` are not
     // allowed as member names, in any of the positions a member can be declared in.
@@ -5134,11 +4954,10 @@ TEST_CASE_FIXTURE(Fixture, "class_members_may_not_be_named_after_keywords")
     CHECK(ok.errors.empty());
 }
 
-TEST_CASE_FIXTURE(Fixture, "class_without_any_classes_flag_says_classes_are_disabled")
+TEST_CASE_FIXTURE(Fixture, "class_without_feature_flag_says_classes_are_disabled")
 {
     ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, false},
-        {FFlag::LuwuBetterUserDefinedClasses, false},
+        {FFlag::LuwuClasses, false},
         {FFlag::LuauExportValueSyntax, true},
     };
 
@@ -5151,8 +4970,8 @@ TEST_CASE_FIXTURE(Fixture, "class_without_any_classes_flag_says_classes_are_disa
 
     REQUIRE(!result.errors.empty());
     CHECK_MESSAGE(
-        result.errors[0].getMessage().find("DebugLuauUserDefinedClasses") != std::string::npos,
-        "expected the flag names, got: " << result.errors[0].getMessage()
+        result.errors[0].getMessage().find("LuwuClasses") != std::string::npos,
+        "expected the flag name, got: " << result.errors[0].getMessage()
     );
 
     ParseResult exported = tryParse(R"(
@@ -5163,40 +4982,8 @@ TEST_CASE_FIXTURE(Fixture, "class_without_any_classes_flag_says_classes_are_disa
 
     REQUIRE(!exported.errors.empty());
     CHECK_MESSAGE(
-        exported.errors[0].getMessage().find("DebugLuauUserDefinedClasses") != std::string::npos,
-        "expected the flag names, got: " << exported.errors[0].getMessage()
-    );
-}
-
-TEST_CASE_FIXTURE(Fixture, "class_without_feature_flag_says_classes_are_disabled")
-{
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, false},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
-    };
-
-    ParseResult result = tryParse(R"(
-        class Point
-            x: number
-        end
-    )");
-
-    REQUIRE(!result.errors.empty());
-    CHECK_MESSAGE(
-        result.errors[0].getMessage().find("DebugLuauUserDefinedClasses") != std::string::npos,
-        "expected the flag names, got: " << result.errors[0].getMessage()
-    );
-
-    ParseResult exported = tryParse(R"(
-        export class Point
-            x: number
-        end
-    )");
-
-    REQUIRE(!exported.errors.empty());
-    CHECK_MESSAGE(
-        exported.errors[0].getMessage().find("DebugLuauUserDefinedClasses") != std::string::npos,
-        "expected the flag names, got: " << exported.errors[0].getMessage()
+        exported.errors[0].getMessage().find("LuwuClasses") != std::string::npos,
+        "expected the flag name, got: " << exported.errors[0].getMessage()
     );
 
     // `class` is still an ordinary identifier without the feature
@@ -5210,10 +4997,7 @@ TEST_CASE_FIXTURE(Fixture, "class_without_feature_flag_says_classes_are_disabled
 
 TEST_CASE_FIXTURE(Fixture, "class_const_function_is_rejected")
 {
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
-    };
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     ParseResult result = tryParse(R"(
         class A
@@ -5239,7 +5023,7 @@ TEST_CASE_FIXTURE(Fixture, "class_const_function_is_rejected")
 
 TEST_CASE_FIXTURE(Fixture, "all_disallowed_metamethods")
 {
-    ScopedFastFlag _{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag _{FFlag::LuwuClasses, true};
 
     ParseResult result = tryParse(R"(
         class Foo
@@ -5263,7 +5047,7 @@ TEST_CASE_FIXTURE(Fixture, "all_disallowed_metamethods")
 
 TEST_CASE_FIXTURE(Fixture, "disallow_double_underscore_properties")
 {
-    ScopedFastFlag _{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag _{FFlag::LuwuClasses, true};
 
     matchParseError(
         R"(
@@ -5277,7 +5061,7 @@ TEST_CASE_FIXTURE(Fixture, "disallow_double_underscore_properties")
 
 TEST_CASE_FIXTURE(Fixture, "allowed_metamethods_still_work")
 {
-    ScopedFastFlag _{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag _{FFlag::LuwuClasses, true};
 
     ParseResult result = tryParse(R"(
         class Foo
@@ -5294,8 +5078,7 @@ TEST_CASE_FIXTURE(Fixture, "allowed_metamethods_still_work")
 
 TEST_CASE_FIXTURE(Fixture, "classes_can_interleave_methods_and_properties")
 {
-    ScopedFastFlag _{FFlag::DebugLuauUserDefinedClasses, true};
-    ScopedFastFlag better{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag _{FFlag::LuwuClasses, true};
 
     ParseResult res = tryParse(R"(
         class Student
@@ -5342,8 +5125,7 @@ TEST_CASE_FIXTURE(Fixture, "classes_can_interleave_methods_and_properties")
 
 TEST_CASE_FIXTURE(Fixture, "large_classes_example")
 {
-    ScopedFastFlag _{FFlag::DebugLuauUserDefinedClasses, true};
-    ScopedFastFlag better{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag _{FFlag::LuwuClasses, true};
 
     ParseResult result = tryParse(R"(
         class PlayerStats
@@ -5383,7 +5165,7 @@ TEST_CASE_FIXTURE(Fixture, "large_classes_example")
 
 TEST_CASE_FIXTURE(Fixture, "classes_only_work_at_top_level")
 {
-    ScopedFastFlag _{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag _{FFlag::LuwuClasses, true};
 
     matchParseError(
         R"(
@@ -5411,7 +5193,7 @@ TEST_CASE_FIXTURE(Fixture, "classes_only_work_at_top_level")
 
 TEST_CASE_FIXTURE(Fixture, "classes_work_after_other_statements")
 {
-    ScopedFastFlag _{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag _{FFlag::LuwuClasses, true};
 
     ParseResult res = tryParse(R"(
         if math.random() > 0.5 then
@@ -5433,7 +5215,7 @@ TEST_CASE_FIXTURE(Fixture, "classes_work_after_other_statements")
 
 TEST_CASE_FIXTURE(Fixture, "class_is_still_contextual")
 {
-    ScopedFastFlag _{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag _{FFlag::LuwuClasses, true};
 
     ParseResult res = tryParse(R"(
         local class = 42
@@ -5449,7 +5231,7 @@ TEST_CASE_FIXTURE(Fixture, "class_is_still_contextual")
 
 TEST_CASE_FIXTURE(Fixture, "class_self_cannot_be_annotated")
 {
-    ScopedFastFlag _{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag _{FFlag::LuwuClasses, true};
 
     matchParseError(
         R"(
@@ -5463,7 +5245,7 @@ TEST_CASE_FIXTURE(Fixture, "class_self_cannot_be_annotated")
 
 TEST_CASE_FIXTURE(Fixture, "classes_cannot_be_shadowed_by_classes")
 {
-    ScopedFastFlag _{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag _{FFlag::LuwuClasses, true};
 
     matchParseError(
         R"(
@@ -5479,7 +5261,7 @@ TEST_CASE_FIXTURE(Fixture, "classes_cannot_be_shadowed_by_classes")
 
 TEST_CASE_FIXTURE(Fixture, "classes_cannot_be_shadowed_by_classes_with_local_between")
 {
-    ScopedFastFlag _{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag _{FFlag::LuwuClasses, true};
 
     matchParseError(
         R"(
@@ -5497,7 +5279,7 @@ TEST_CASE_FIXTURE(Fixture, "classes_cannot_be_shadowed_by_classes_with_local_bet
 
 TEST_CASE_FIXTURE(Fixture, "classes_can_be_shadowed_by_locals")
 {
-    ScopedFastFlag _{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag _{FFlag::LuwuClasses, true};
 
     ParseResult result = tryParse(R"(
         class Foobar
@@ -5513,10 +5295,7 @@ TEST_CASE_FIXTURE(Fixture, "classes_can_be_shadowed_by_locals")
 
 TEST_CASE_FIXTURE(Fixture, "classes_cannot_have_members_named_public")
 {
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
-    };
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     // rfcs/classes: a member named after an access specifier is rejected, both where it reads as a
     // member name outright and where a qualifier precedes it.
@@ -5535,7 +5314,7 @@ TEST_CASE_FIXTURE(Fixture, "classes_cannot_have_members_named_public")
 
 TEST_CASE_FIXTURE(Fixture, "classes_nested_and_repeated")
 {
-    ScopedFastFlag _{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag _{FFlag::LuwuClasses, true};
 
     ParseResult result = tryParse(R"(
         class Foo
@@ -5554,7 +5333,7 @@ TEST_CASE_FIXTURE(Fixture, "classes_nested_and_repeated")
 
 TEST_CASE_FIXTURE(Fixture, "non_exported_class")
 {
-    ScopedFastFlag _{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag _{FFlag::LuwuClasses, true};
 
     ParseResult result = tryParse(R"(
         class Foo
@@ -5573,7 +5352,7 @@ TEST_CASE_FIXTURE(Fixture, "non_exported_class")
 
 TEST_CASE_FIXTURE(Fixture, "export_class")
 {
-    ScopedFastFlag _{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag _{FFlag::LuwuClasses, true};
 
     ParseResult result = tryParse(R"(
         export class Foo
@@ -7482,7 +7261,7 @@ return {
 
 TEST_CASE_FIXTURE(Fixture, "export_value_parse_failures")
 {
-    ScopedFastFlag sffs[] = {{FFlag::LuauExportValueSyntax, true}, {FFlag::DebugLuauUserDefinedClasses, true}, {FFlag::LuwuBetterUserDefinedClasses, true}};
+    ScopedFastFlag sffs[] = {{FFlag::LuauExportValueSyntax, true}, {FFlag::LuwuClasses, true}};
 
     auto expectParseError = [&](const std::string& source)
     {

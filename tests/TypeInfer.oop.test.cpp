@@ -17,7 +17,7 @@ using namespace Luau;
 LUAU_FASTFLAG(DebugLuauForceOldSolver)
 LUAU_FASTFLAG(LuauExportValueSyntax)
 LUAU_FASTFLAG(LuauFixPropReadsOnMetatableTypes)
-LUAU_FASTFLAG(LuwuBetterUserDefinedClasses)
+LUAU_FASTFLAG(LuwuClasses)
 
 TEST_SUITE_BEGIN("TypeInferOOP");
 
@@ -834,7 +834,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "assign_to_prop_of_intersection_of_metatables
 TEST_CASE_FIXTURE(Fixture, "classes_arent_in_old_solver")
 {
     ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
+        {FFlag::LuwuClasses, true},
         {FFlag::DebugLuauForceOldSolver, true},
     };
 
@@ -848,7 +848,7 @@ TEST_CASE_FIXTURE(Fixture, "classes_arent_in_old_solver")
 TEST_CASE_FIXTURE(Fixture, "export_class_isnt_in_old_solver")
 {
     ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
+        {FFlag::LuwuClasses, true},
         {FFlag::DebugLuauForceOldSolver, true},
     };
 
@@ -862,7 +862,7 @@ TEST_CASE_FIXTURE(Fixture, "export_class_isnt_in_old_solver")
 TEST_CASE_FIXTURE(Fixture, "empty_class")
 {
     ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
+        {FFlag::LuwuClasses, true},
         {FFlag::DebugLuauForceOldSolver, false},
     };
 
@@ -873,7 +873,7 @@ TEST_CASE_FIXTURE(Fixture, "empty_class")
 TEST_CASE_FIXTURE(Fixture, "class_decl")
 {
     ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
+        {FFlag::LuwuClasses, true},
         {FFlag::DebugLuauForceOldSolver, false},
     };
 
@@ -905,8 +905,7 @@ TEST_CASE_FIXTURE(Fixture, "class_decl")
 TEST_CASE_FIXTURE(Fixture, "point_class")
 {
     ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
+        {FFlag::LuwuClasses, true},
         {FFlag::DebugLuauForceOldSolver, false},
     };
 
@@ -944,7 +943,7 @@ TEST_CASE_FIXTURE(Fixture, "point_class")
 TEST_CASE_FIXTURE(Fixture, "self_argument_has_self_type")
 {
     ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
+        {FFlag::LuwuClasses, true},
         {FFlag::DebugLuauForceOldSolver, false},
     };
 
@@ -967,7 +966,7 @@ TEST_CASE_FIXTURE(Fixture, "self_argument_has_self_type")
 TEST_CASE_FIXTURE(Fixture, "fuzzer_duplicate_class_definition")
 {
     ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
+        {FFlag::LuwuClasses, true},
         {FFlag::DebugLuauForceOldSolver, false},
     };
 
@@ -987,7 +986,7 @@ TEST_CASE_FIXTURE(Fixture, "fuzzer_duplicate_class_definition")
 TEST_CASE_FIXTURE(Fixture, "repeat_props")
 {
     ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
+        {FFlag::LuwuClasses, true},
         {FFlag::DebugLuauForceOldSolver, false},
     };
 
@@ -1008,7 +1007,7 @@ end
 TEST_CASE_FIXTURE(Fixture, "repeat_class_methods")
 {
     ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
+        {FFlag::LuwuClasses, true},
         {FFlag::DebugLuauForceOldSolver, false},
     };
 
@@ -1032,7 +1031,7 @@ end
 TEST_CASE_FIXTURE(Fixture, "repeat_nameless_class_methods")
 {
     ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
+        {FFlag::LuwuClasses, true},
         {FFlag::DebugLuauForceOldSolver, false},
     };
 
@@ -1061,7 +1060,7 @@ end
 
 TEST_CASE_FIXTURE(Fixture, "fuzzer_self_referential_class_definition")
 {
-    ScopedFastFlag _{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag _{FFlag::LuwuClasses, true};
     ScopedFastFlag newSolver{FFlag::DebugLuauForceOldSolver, false};
 
     CheckResult result = check(R"(
@@ -1083,7 +1082,7 @@ TEST_CASE_FIXTURE(Fixture, "fuzzer_self_referential_class_definition")
 TEST_CASE_FIXTURE(Fixture, "instantiate_duplicate_class")
 {
     ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
+        {FFlag::LuwuClasses, true},
         {FFlag::DebugLuauForceOldSolver, false},
     };
 
@@ -1108,7 +1107,7 @@ TEST_CASE_FIXTURE(Fixture, "prop_with_typeof_reassigned_class")
 {
     ScopedFastFlag sffs[] = {
         {FFlag::DebugLuauForceOldSolver, false},
-        {FFlag::DebugLuauUserDefinedClasses, true},
+        {FFlag::LuwuClasses, true},
         {FFlag::LuauExportValueSyntax, true},
     };
 
@@ -1137,7 +1136,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "class_that_shadows_a_type_alias")
 {
     ScopedFastFlag sffs[] = {
         {FFlag::DebugLuauForceOldSolver, false},
-        {FFlag::DebugLuauUserDefinedClasses, true},
+        {FFlag::LuwuClasses, true},
     };
 
     CheckResult result = check(R"(
@@ -1156,8 +1155,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "typecheck_class_method_field_access")
 {
     ScopedFastFlag sffs[] = {
         {FFlag::DebugLuauForceOldSolver, false},
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
+        {FFlag::LuwuClasses, true},
     };
 
     CheckResult result = check(R"(
@@ -1184,8 +1182,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "typecheck_class_annotations")
 {
     ScopedFastFlag sffs[] = {
         {FFlag::DebugLuauForceOldSolver, false},
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
+        {FFlag::LuwuClasses, true},
     };
 
     CheckResult result = check(R"(
@@ -1212,8 +1209,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "read_unknown_property_from_class_object_or_i
 {
     ScopedFastFlag sffs[] = {
         {FFlag::DebugLuauForceOldSolver, false},
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
+        {FFlag::LuwuClasses, true},
     };
 
     CheckResult result = check(R"(
@@ -1246,8 +1242,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "writes_to_class_object_properties_are_forbid
 {
     ScopedFastFlag sffs[] = {
         {FFlag::DebugLuauForceOldSolver, false},
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
+        {FFlag::LuwuClasses, true},
     };
 
     CheckResult result = check(R"(
@@ -1304,8 +1299,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "writes_to_unknown_class_instance_properties_
 {
     ScopedFastFlag sffs[] = {
         {FFlag::DebugLuauForceOldSolver, false},
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
+        {FFlag::LuwuClasses, true},
     };
 
     CheckResult result = check(R"(

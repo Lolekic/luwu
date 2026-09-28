@@ -140,7 +140,7 @@ static TypeId shallowClone(TypeId ty, TypeArena& dest, const TxnLog* log)
             // Preserve the hierarchy root explicitly; roots are persistent builtins that are never
             // cloned, so this stays valid even as `parent` is re-pointed to substituted children.
             clone.root = a.root;
-            if (FFlag::DebugLuauUserDefinedClasses)
+            if (FFlag::LuwuClasses)
             {
                 clone.relation = a.relation;
                 clone.initLocation = a.initLocation;
@@ -281,7 +281,7 @@ void Tarjan::visitChildren(TypeId ty, int index)
             visitChild(etv->indexer->indexResultType);
         }
 
-        if (FFlag::DebugLuauUserDefinedClasses && etv->relation)
+        if (FFlag::LuwuClasses && etv->relation)
         {
             Luau::visit(
                 overloaded{
@@ -894,7 +894,7 @@ void Substitution::replaceChildren(TypeId ty)
         // `clone()` copies `relation` across verbatim and `isDirty` descends into it, so it has to
         // be re-pointed here like every other child: otherwise the substituted copy holds a pointer
         // into the arena the original came from, which is freed once that module is done.
-        if (FFlag::DebugLuauUserDefinedClasses && etv->relation)
+        if (FFlag::LuwuClasses && etv->relation)
         {
             Luau::visit(
                 overloaded{

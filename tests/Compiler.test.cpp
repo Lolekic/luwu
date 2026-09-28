@@ -33,7 +33,7 @@ LUAU_FASTFLAG(LuwuExportedClassIsNilWorkaround)
 LUAU_FASTFLAG(DebugLuauNoInline)
 LUAU_FASTFLAG(LuauEmitCallFeedback)
 LUAU_FASTFLAG(LuwuDefaultArguments)
-LUAU_FASTFLAG(LuwuBetterUserDefinedClasses)
+LUAU_FASTFLAG(LuwuClasses)
 LUAU_FASTFLAG(LuwuGenericNominals)
 LUAU_FASTFLAG(DebugLuwuCompilerTrustsTypeAnnotations)
 
@@ -11105,7 +11105,7 @@ RETURN R0 11
 
 TEST_CASE("ClassDeclBasic")
 {
-    ScopedFastFlag _{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag _{FFlag::LuwuClasses, true};
 
     std::string source = R"(
         class Point
@@ -11127,8 +11127,7 @@ RETURN R0 0
 
 TEST_CASE("ClassGenericsAreUntypedInMethodSignatures")
 {
-    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
-    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
     ScopedFastFlag genericNominals{FFlag::LuwuGenericNominals, true};
 
     // A class's own generic (`T` in `class List<T>`) must type like a function generic -- unknown -- in
@@ -11169,8 +11168,7 @@ RETURN R0 0
 
 TEST_CASE("ClassTypedLocalRangeStartsAfterInitializer")
 {
-    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
-    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
     ScopedFastFlag genericNominals{FFlag::LuwuGenericNominals, true};
     ScopedFastFlag noCallFb{FFlag::LuauEmitCallFeedback, false};
 
@@ -11214,8 +11212,7 @@ RETURN R0 1
 
 TEST_CASE("ClassGenericAnnotationResolvesReceiverForInlining")
 {
-    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
-    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
     ScopedFastFlag genericNominals{FFlag::LuwuGenericNominals, true};
     // this test is about receivers the compiler knows only from an annotation
     ScopedFastFlag trustAnnotations{FFlag::DebugLuwuCompilerTrustsTypeAnnotations, true};
@@ -11254,8 +11251,7 @@ end
 
 TEST_CASE("ClassConstructionResolvesReceiverForInlining")
 {
-    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
-    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     // A local initialized by constructing a class in this module is an instance of that class with no
     // annotation, so its method calls inline (classFromConstruction). A local that is assigned to
@@ -11302,8 +11298,7 @@ end
 
 TEST_CASE("ClassReceiverTrustTiersDecideSelfCheck")
 {
-    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
-    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
     // this test is about receivers the compiler knows only from an annotation
     ScopedFastFlag trustAnnotations{FFlag::DebugLuwuCompilerTrustsTypeAnnotations, true};
 
@@ -11370,8 +11365,7 @@ end
 
 TEST_CASE("ClassIsinstanceProvenReceiverInlinesWithoutSelfCheck")
 {
-    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
-    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
     // only `annotated`, the contrast case, needs annotations trusted to inline at all
     ScopedFastFlag trustAnnotations{FFlag::DebugLuwuCompilerTrustsTypeAnnotations, true};
 
@@ -11437,8 +11431,7 @@ end
 
 TEST_CASE("ClassIsinstanceProofIsBoundedByTheBranchItGuards")
 {
-    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
-    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     // A class.isinstance proof removes the inline site's CHECKSELFCLASS. If a write could replace the
     // local before a use inside the branch, the inlined body would read constant field offsets off the
@@ -11584,8 +11577,7 @@ end
 
 TEST_CASE("ClassAssertIsinstanceProvesTheRestOfTheBlock")
 {
-    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
-    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     // `assert(class.isinstance(c, C))` raises when the check fails. So every path that reaches the
     // statements after it passed the same runtime check JUMPXISA performs. The assert therefore proves `c`
@@ -11695,8 +11687,7 @@ end
 
 TEST_CASE("ClassAnnotationReceiversNeedTheTrustFlag")
 {
-    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
-    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     // rfcs/classes: by default the compiler acts only on receivers a runtime check on this path
     // proves. A class known from a declared parameter, local or field type compiles to an ordinary
@@ -11796,8 +11787,7 @@ end
 
 TEST_CASE("ClassAssertIsinstanceFusesIntoJumpxisa")
 {
-    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
-    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     // `assert(class.isinstance(x, C))` is how code opts into the proven receiver tier, so it ends up in hot
     // paths. It must cost what the `if` form costs: one JUMPXISA over the assert, not two builtin call
@@ -11859,8 +11849,7 @@ end
 
 TEST_CASE("TrustDirectiveEnablesAnnotationTrust")
 {
-    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
-    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     // `--!trust` is the file saying its annotations are true, so the compiler may act on them. Without
     // it the receiver's class is known only from a declaration nothing verified, and the call stays a
@@ -11912,8 +11901,7 @@ end
 
 TEST_CASE("ClassIsinstanceProofDoesNotInlinePrivateMethods")
 {
-    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
-    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     // The call to a private method *is* the private access NAMECALL checks, so proving the receiver's
     // class doesn't make it inlinable from outside the class -- proving the class and being allowed to
@@ -11950,8 +11938,7 @@ end
 
 TEST_CASE("ClassUsedBeforeItsDeclarationChecksItsBinding")
 {
-    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
-    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     // rfcs/classes: a class binding is nil until its declaration runs, and a function declared above
     // the class can run first. NEWOBJECT and an unchecked JUMPXISA take the class operand on trust, so code
@@ -11991,8 +11978,7 @@ end
 
 TEST_CASE("ClassPrimaryConstructorFieldsFormKeepsPrivateAccess")
 {
-    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
-    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     // rfcs/classes: a primary constructor's initializers are class code, so the construction site may
     // compile them itself (NEWOBJECT ... FIELDS) only where that doesn't change what they may access.
@@ -12051,8 +12037,7 @@ end
 
 TEST_CASE("ClassPrimaryConstructorFieldsFormInsideAnotherClass")
 {
-    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
-    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     // Spy is constructed inside a Vault method. If Spy's initializers were compiled at that construction
     // site, they would run with Vault's private access. So an initializer that names a member private to
@@ -12080,8 +12065,7 @@ end
 
 TEST_CASE("ClassRecursivePrimaryConstructorFallsBackToInit")
 {
-    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
-    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     // rfcs/classes: an initializer may construct its own class. The site expands the initializers once,
     // and the construction inside them goes through `__init`, as does the one in `__init` itself.
@@ -12108,8 +12092,7 @@ end
 
 TEST_CASE("ClassAssertIsinstanceFailurePathRaises")
 {
-    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
-    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     // rfcs/classes: the code after a fused `assert(class.isinstance(...))` is proven, so a failed check
     // must never reach it. That has to hold even when `assert` has been replaced, through the environment,
@@ -12154,8 +12137,7 @@ end
 
 TEST_CASE("ClassAssertIsinstanceProvesInlinedAndRepeatBodies")
 {
-    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
-    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     // An assert proves the rest of the statement list it is in, including the body of a function inlined
     // into another, and a repeat body.
@@ -12201,8 +12183,7 @@ end
 
 TEST_CASE("ClassMethodInlinedIntoAnotherClassGainsNoPrivateAccess")
 {
-    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
-    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     // rfcs/classes: an inlined body runs under the caller's closure. Cat's method inlined into a Dog
     // method would read Dog's private fields with Dog's access, which the call doesn't have, so a body that
@@ -12244,8 +12225,7 @@ end
 
 TEST_CASE("ClassMethodPassingObjectsToPodConstructionKeepsItsCall")
 {
-    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
-    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     // rfcs/classes: a POD constructor reads an object argument's fields with the private access of the
     // nearest Lua frame. Once a method body is inlined, that frame is the caller's.
@@ -12304,8 +12284,7 @@ end
 
 TEST_CASE("ClassAnnotationResolutionRespectsShadowingAndDeclarationOrder")
 {
-    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
-    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
     ScopedFastFlag trustAnnotations{FFlag::DebugLuwuCompilerTrustsTypeAnnotations, true};
 
     // A trusted annotation names a class only if nothing can shadow the name: the compiler has no type
@@ -12363,8 +12342,7 @@ end
 
 TEST_CASE("ClassUnfusedAssertIsinstanceProvesNothing")
 {
-    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
-    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     // Only a fused assert is followed by the recheck that raises when the environment's `assert` returns, so
     // an assert whose message can't be read twice leaves its receiver unproven.
@@ -12401,8 +12379,7 @@ end
 
 TEST_CASE("ClassInliningGainsNothingFromDeclarationsOrFields")
 {
-    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
-    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
     ScopedFastFlag trustAnnotations{FFlag::DebugLuwuCompilerTrustsTypeAnnotations, true};
 
     // Inlined into a Dog method, a Cat method runs with Dog's private access. So these two Cat methods
@@ -12460,8 +12437,7 @@ end
 
 TEST_CASE("ClassInitDoesNotInlineConstFieldWrites")
 {
-    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
-    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     // rfcs/classes: a `const` field is written only by its class's `__init`, checked against the running
     // closure. A function `__init` calls must not be inlined into it if it may write one of the class's const
@@ -12524,8 +12500,7 @@ return r
 
 TEST_CASE("ClassDeclWithMethod")
 {
-    ScopedFastFlag _{FFlag::DebugLuauUserDefinedClasses, true};
-    ScopedFastFlag better{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag _{FFlag::LuwuClasses, true};
     // This dump expects a plain CALL for the in-method `error(...)`; pin the
     // feedback-vector opcode off so it stays deterministic under --fflags=true
     // (where LuauEmitCallFeedback would otherwise emit CALLFB for this nested,
@@ -12569,8 +12544,7 @@ RETURN R0 0
 
 TEST_CASE("ClassConstantFieldDefaults")
 {
-    ScopedFastFlag _{FFlag::DebugLuauUserDefinedClasses, true};
-    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag _{FFlag::LuwuClasses, true};
 
     // A POD class whose field defaults are all compile-time constants carries them in its own class
     // shape, so it needs no synthesized `__defaults` closure -- no extra proto, no NEWCLASSMEMBER,
@@ -12614,8 +12588,7 @@ RETURN R0 0
 
 TEST_CASE("ClassNewObject")
 {
-    ScopedFastFlag _{FFlag::DebugLuauUserDefinedClasses, true};
-    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag _{FFlag::LuwuClasses, true};
 
     // A call whose callee is a statically resolved class compiles to NEWOBJECT: on its own for a
     // class using the default constructor, and followed by a plain CALL of `__init` for a class that
@@ -12675,8 +12648,7 @@ RETURN R0 0
 
 TEST_CASE("ClassPrimaryConstructor")
 {
-    ScopedFastFlag _{FFlag::DebugLuauUserDefinedClasses, true};
-    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag _{FFlag::LuwuClasses, true};
 
     // A primary constructor (rfcs/classes) declares a public field per parameter. A statically
     // resolved construction site doesn't call the synthesized `__init` at all: the parameters are
@@ -12715,8 +12687,7 @@ RETURN R0 0
 
 TEST_CASE("ClassPrimaryConstructorInit")
 {
-    ScopedFastFlag _{FFlag::DebugLuauUserDefinedClasses, true};
-    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag _{FFlag::LuwuClasses, true};
     // a primary constructor's parameter defaults ride on the function parameter default flag
     ScopedFastFlag defaultArgs{FFlag::LuwuDefaultArguments, true};
 
@@ -12747,8 +12718,7 @@ RETURN R0 0
 
 TEST_CASE("ClassMethodInlineSelfCheck")
 {
-    ScopedFastFlag _{FFlag::DebugLuauUserDefinedClasses, true};
-    ScopedFastFlag better{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag _{FFlag::LuwuClasses, true};
     // see ClassDeclWithMethod: pin the feedback-vector opcode off so the in-method `error(...)`
     // stays a plain CALL in this dump
     ScopedFastFlag noCallFb{FFlag::LuauEmitCallFeedback, false};
@@ -12800,7 +12770,7 @@ RETURN R1 1
 
 TEST_CASE("ClassMethodInlineNoRecursion")
 {
-    ScopedFastFlag _{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag _{FFlag::LuwuClasses, true};
     // see ClassDeclWithMethod: pin the feedback-vector opcode off so the non-inlined recursive
     // `self:pong(...)` stays a plain CALL in this dump
     ScopedFastFlag noCallFb{FFlag::LuauEmitCallFeedback, false};
@@ -12935,8 +12905,7 @@ TEST_CASE("ClassDeclWithAmbiguousGlobal")
 {
     ScopedFastFlag sffs[] = {
         {FFlag::LuauCompileStringInterpTargetTop, true},
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
+        {FFlag::LuwuClasses, true},
         {FFlag::LuauEmitCallFeedback, true},
     };
 
@@ -12977,7 +12946,7 @@ RETURN R1 1
 
 TEST_CASE("ClassDeclHoistingForwardReference")
 {
-    ScopedFastFlag _{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag _{FFlag::LuwuClasses, true};
 
     std::string source = R"(
         local ref = Point
@@ -12997,7 +12966,7 @@ RETURN R0 0
 
 TEST_CASE("ClassDeclHoistingNestedFunctionUpvalCapture")
 {
-    ScopedFastFlag _{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag _{FFlag::LuwuClasses, true};
 
     std::string source = R"(
         class Point
@@ -13025,7 +12994,7 @@ RETURN R0 0
 
 TEST_CASE("ClassDeclHoistingForwardWriteProducesError")
 {
-    ScopedFastFlag _{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag _{FFlag::LuwuClasses, true};
 
     std::string source = R"(
         Point = nil
@@ -13862,8 +13831,7 @@ TEST_CASE("ExportClass")
 {
     ScopedFastFlag sffs[] = {
         {FFlag::LuauExportValueSyntax, true},
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
+        {FFlag::LuwuClasses, true},
         {FFlag::LuwuExportedClassIsNilWorkaround, false},
     };
 
@@ -14051,8 +14019,7 @@ static std::string compileTypesWithoutRanges(const char* source, uint32_t id, in
 
 TEST_CASE("ClassTypeHintsSeeClassesDeclaredLater")
 {
-    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
-    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
     ScopedFastFlag genericNominals{FFlag::LuwuGenericNominals, true};
 
     // Classes hoist, so code above a class's declaration can name it. The type hints checked here:
@@ -14119,8 +14086,7 @@ R0: object [argument]
 
 TEST_CASE("ClassConstructionHintSkipsWrittenLocals")
 {
-    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
-    ScopedFastFlag betterClasses{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     // Codegen guards a local's declared type with a VM exit, so a construction's `object` hint on a local that is
     // later written would exit on every call once the write runs. Only `kept` is never written.
@@ -14166,7 +14132,7 @@ local function f(x: object, y: class) return x end
 )";
 
     {
-        ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, false};
+        ScopedFastFlag luwuClasses{FFlag::LuwuClasses, false};
 
         CHECK_EQ(compileTypesWithoutRanges(source, 0, 1), R"(
 R0: userdata [argument]
@@ -14175,7 +14141,7 @@ R1: userdata [argument]
     }
 
     {
-        ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
+        ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
         CHECK_EQ(compileTypesWithoutRanges(source, 0, 1), R"(
 R0: object [argument]

@@ -2,7 +2,7 @@
 
 Status: one of "Proposed", "Implemented (Flagged)", or "Stable"
 
-FFlag: your fflag(s), like "LuwuBetterUserDefinedClasses" or "DebugLuwuMyFeature, DebugLuwuMyFeatureAlternate"
+FFlag: your fflag(s), like "LuwuClasses" or "DebugLuwuMyFeature, DebugLuwuMyFeatureAlternate"
 
 ## Summary
 

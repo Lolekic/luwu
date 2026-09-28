@@ -23,7 +23,7 @@
 LUAU_FASTFLAG(LuauDirectFieldGet)
 LUAU_FASTFLAG(LuauCIProto)
 LUAU_FASTFLAG(LuauPromoteProto)
-LUAU_FASTFLAG(DebugLuauUserDefinedClassesRuntime)
+LUAU_FASTFLAG(LuwuClasses)
 
 // All external function calls that can cause stack realloc or Lua calls have to be wrapped in VM_PROTECT
 // This makes sure that we save the pc (in case the Lua call needs to generate a backtrace) before the call,
@@ -586,7 +586,7 @@ const Instruction* executeGETTABLEKS(lua_State* L, const Instruction* pc, StkId 
         // fast paths bail here on a stale cached slot. Mirror the interpreter's LOP_GETTABLEKS object/
         // class handling and patch the cached slot, which the native fast paths only read: this
         // fallback is the only place native code learns it.
-        if (FFlag::DebugLuauUserDefinedClassesRuntime && ttisobject(rb))
+        if (FFlag::LuwuClasses && ttisobject(rb))
         {
             uint8_t slot = LUAU_INSN_C(insn);
             LuauObject* inst = objectvalue(rb);
@@ -611,7 +611,7 @@ const Instruction* executeGETTABLEKS(lua_State* L, const Instruction* pc, StkId 
                 return pc;
             }
         }
-        else if (FFlag::DebugLuauUserDefinedClassesRuntime && ttisclass(rb))
+        else if (FFlag::LuwuClasses && ttisclass(rb))
         {
             uint8_t slot = LUAU_INSN_C(insn);
             LuauClass* lco = classvalue(rb);
@@ -714,7 +714,7 @@ const Instruction* executeSETTABLEKS(lua_State* L, const Instruction* pc, StkId 
         // Luwu Classes (rfcs/classes): the native TRY_OBJECT_MEMBER_ADDR (write mode) fast path
         // bails here on a stale cached slot. Mirror the interpreter's LOP_SETTABLEKS object handling
         // and patch the cached slot, as executeGETTABLEKS does.
-        if (FFlag::DebugLuauUserDefinedClassesRuntime && ttisobject(rb))
+        if (FFlag::LuwuClasses && ttisobject(rb))
         {
             uint8_t slot = LUAU_INSN_C(insn);
             LuauObject* inst = objectvalue(rb);
@@ -781,7 +781,7 @@ const Instruction* executeNAMECALL(lua_State* L, const Instruction* pc, StkId ba
         if (ttisnil(ra))
             luaG_methoderror(L, ra + 1, tsvalue(kv));
     }
-    else if (FFlag::DebugLuauUserDefinedClassesRuntime && ttisobject(rb))
+    else if (FFlag::LuwuClasses && ttisobject(rb))
     {
         // Luwu Classes (rfcs/classes): the native TRY_OBJECT_NAMECALL_ADDR fast path bails here on a
         // stale cached slot. Mirror the interpreter's LOP_NAMECALL object handling and patch the cached

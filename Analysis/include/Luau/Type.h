@@ -454,14 +454,12 @@ struct Property
     bool deprecated = false;
     std::string deprecatedSuggestion;
 
-    // True if this property was declared `private` on a user-defined class (see
-    // FFlag::DebugLuauUserDefinedClasses). Private members may only be accessed from
-    // within the class's own definition block.
+    // Luwu Classes (rfcs/classes): true if this property was declared `private` on a class.
+    // Private members may only be accessed from within the class's own definition block.
     bool isPrivate = false;
 
-    // True if this property was declared `const` on a user-defined class (see
-    // FFlag::DebugLuauUserDefinedClasses, FFlag::LuwuBetterUserDefinedClasses). Const members
-    // may only be assigned to from within the class's own `__init` constructor.
+    // Luwu Classes (rfcs/classes): true if this property was declared `const` on a class.
+    // Const members may only be assigned to from within the class's own `__init` constructor.
     bool isConst = false;
 
     // If this property was inferred from an expression, this field will be
@@ -564,7 +562,7 @@ struct ClassUserData
     virtual ~ClassUserData() {}
 };
 
-// Attached to a user-defined class's instance ExternType (see FFlag::DebugLuauUserDefinedClasses).
+// Luwu Classes (rfcs/classes): attached to a class's instance ExternType.
 // It lists which of the type's `props` are fields rather than methods.
 // Fields and non-metamethod instance methods share the same `props` map, and a Property alone can't
 // tell them apart: a method's `readTy` only resolves to a FunctionType once constraint solving
@@ -624,8 +622,8 @@ struct ExternType
         If this ExternType is a class, contains the location of the class's `__init` method
         body, if the class defines one.
         
-        This is used to check that `const` properties are only assigned within their `__init` constructor
-        (see FFlag::DebugLuauUserDefinedClasses, FFlag::LuwuBetterUserDefinedClasses)
+        Luwu Classes (rfcs/classes): used to check that `const` properties are only assigned within
+        their `__init` constructor.
     */
     std::optional<Location> initLocation;
     std::optional<TableIndexer> indexer;

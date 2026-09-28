@@ -26,8 +26,6 @@ LUAU_FASTFLAGVARIABLE(LuauExportValueSyntax)
 LUAU_FLAGVERSION(LuauExportValueSyntax, 3)
 
 LUAU_FASTFLAGVARIABLE(DebugLuauNoInline)
-LUAU_FASTFLAGVARIABLE(DebugLuauUserDefinedClasses)
-LUAU_FASTFLAGVARIABLE(LuwuBetterUserDefinedClasses)
 LUAU_FASTFLAGVARIABLE(LuauAllowGlobalDeclarationToBeCalledClass)
 LUAU_FASTFLAGVARIABLE(LuauDisallowExternClassInTypeDefinitions)
 LUAU_FASTFLAGVARIABLE(LuauTableEntriesDontNeedToMatchIndent)
@@ -52,9 +50,7 @@ namespace
 // class declaration parses as a nonsense expression statement and reports something about assignments
 // (upstream: "Incomplete statement: expected assignment or a function call").
 // Users have read that as "my Luwu build is broken", so say what is actually wrong.
-const char* const kClassesDisabledError =
-    "Classes are currently disabled; enable the 'DebugLuauUserDefinedClasses', 'DebugLuauUserDefinedClassesRuntime' and "
-    "'LuwuBetterUserDefinedClasses' fast flags to use 'class'";
+const char* const kClassesDisabledError = "Classes are currently disabled; enable the 'LuwuClasses' fast flag to use 'class'";
 
 // Luwu Classes (rfcs/classes): class members may not be named after the keywords that appear in the
 // class header or in front of a member. This keeps those positions unambiguous, and leaves room to give
@@ -534,7 +530,7 @@ AstStat* Parser::parseStat()
 
     if (ident == "class")
     {
-        if (FFlag::DebugLuauUserDefinedClasses)
+        if (FFlag::LuwuClasses)
             return parseClassStat(start, /*exported*/ false, start);
 
         // Without the feature, `class` is an ordinary identifier, so only diagnose the shape a class
@@ -568,7 +564,7 @@ AstStat* Parser::parseStat()
         // TODO: remove with LuauExportValueSyntax
         else if (lexer.current().type == Lexeme::Name && AstName(lexer.current().name) == "class")
         {
-            if (!FFlag::DebugLuauUserDefinedClasses)
+            if (!FFlag::LuwuClasses)
                 return reportStatError(expr->location, copy({expr}), {}, "%s", kClassesDisabledError);
 
             Location classKeywordLocation = lexer.current().location;
@@ -946,7 +942,7 @@ AstExpr* Parser::parseFunctionName(bool& hasself, AstName& debugname)
 
 AstStatClass* Parser::getMatchingClass(AstExpr* expr)
 {
-    LUAU_ASSERT(FFlag::DebugLuauUserDefinedClasses);
+    LUAU_ASSERT(FFlag::LuwuClasses);
     if (AstExprGlobal* g = expr->as<AstExprGlobal>())
     {
         if (AstStatClass** classDecl = classesWithinModule.find(g->name))
@@ -958,7 +954,7 @@ AstStatClass* Parser::getMatchingClass(AstExpr* expr)
 bool Parser::isExprLValue(AstExpr* expr)
 {
     return (expr->is<AstExprLocal>() && !expr->as<AstExprLocal>()->local->isConst) ||
-           (expr->is<AstExprGlobal>() && !(FFlag::DebugLuauUserDefinedClasses && getMatchingClass(expr) != nullptr)) ||
+           (expr->is<AstExprGlobal>() && !(FFlag::LuwuClasses && getMatchingClass(expr) != nullptr)) ||
            expr->is<AstExprIndexExpr>() || expr->is<AstExprIndexName>();
 }
 
@@ -1659,7 +1655,7 @@ LUAU_NOINLINE AstClassPrimaryConstructor* Parser::parseClassPrimaryConstructor(
     AstClassMemberVisibility visibility
 )
 {
-    LUAU_ASSERT(FFlag::DebugLuauUserDefinedClasses && FFlag::LuwuBetterUserDefinedClasses);
+    LUAU_ASSERT(FFlag::LuwuClasses);
 
     Lexeme matchParen = lexer.current();
     Location start = lexer.current().location;
@@ -1826,7 +1822,7 @@ bool Parser::classBodyLooksLikeStatement()
 // access ::= `public' | `private'
 LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool exported, const Location& classKeywordLocation)
 {
-    LUAU_ASSERT(FFlag::DebugLuauUserDefinedClasses);
+    LUAU_ASSERT(FFlag::LuwuClasses);
     std::optional<Name> name = parseNameOpt("type name");
 
     // Use error name if the name is missing
@@ -1835,7 +1831,7 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
 
     AstArray<AstGenericType*> generics{};
     AstArray<AstGenericTypePack*> genericPacks{};
-    if (FFlag::LuwuBetterUserDefinedClasses && FFlag::LuwuGenericNominals)
+    if (FFlag::LuwuGenericNominals)
     {
         // Luwu Classes (rfcs/classes): a class's generic parameter list may carry defaults, like
         // a type alias's -- `class Box<T = string>`.
@@ -1849,7 +1845,7 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
     std::optional<Location> ctorQualifierLocation;
     AstClassMemberVisibility ctorVisibility = AstClassMemberVisibility::Public;
 
-    if (FFlag::LuwuBetterUserDefinedClasses && lexer.current().type == Lexeme::Name && lexer.lookahead().type == '(' &&
+    if (lexer.current().type == Lexeme::Name && lexer.lookahead().type == '(' &&
         (AstName(lexer.current().name) == "public" || AstName(lexer.current().name) == "private"))
     {
         ctorQualifierLocation = lexer.current().location;
@@ -1865,7 +1861,7 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
     // wrong for anyone porting upstream classes. Checked both before and after a primary constructor.
     auto rejectExtends = [&]()
     {
-        if (!FFlag::LuwuBetterUserDefinedClasses || lexer.current().type != Lexeme::Name || AstName(lexer.current().name) != "extends" ||
+        if (lexer.current().type != Lexeme::Name || AstName(lexer.current().name) != "extends" ||
             lexer.lookahead().type != Lexeme::Name)
             return;
 
@@ -1886,7 +1882,7 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
     // so it produces only one error.
     auto rejectImplements = [&]()
     {
-        if (!FFlag::LuwuBetterUserDefinedClasses || lexer.current().type != Lexeme::Name || AstName(lexer.current().name) != "implements" ||
+        if (lexer.current().type != Lexeme::Name || AstName(lexer.current().name) != "implements" ||
             lexer.lookahead().type != Lexeme::Name)
             return;
 
@@ -1910,7 +1906,7 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
 
     AstClassPrimaryConstructor* primaryConstructor = nullptr;
 
-    if (FFlag::LuwuBetterUserDefinedClasses && lexer.current().type == '(')
+    if (lexer.current().type == '(')
         primaryConstructor = parseClassPrimaryConstructor(ctorQualifierLocation, ctorVisibility);
 
     if (primaryConstructor)
@@ -2001,7 +1997,7 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
         // missing its `end` swallows the statements after it, and the error shows up at whichever token
         // finally isn't a member, often many lines away. When the current token reads as a statement,
         // report the missing `end` here and hand the rest of the file back to the enclosing block.
-        if (FFlag::LuwuBetterUserDefinedClasses && classBodyLooksLikeStatement())
+        if (classBodyLooksLikeStatement())
         {
             report(
                 lexer.current().location,
@@ -2026,8 +2022,7 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
 
         auto memberAttributesFollow = [&]()
         {
-            return FFlag::LuwuBetterUserDefinedClasses &&
-                   (lexer.current().type == Lexeme::Attribute || lexer.current().type == Lexeme::AttributeOpen);
+            return lexer.current().type == Lexeme::Attribute || lexer.current().type == Lexeme::AttributeOpen;
         };
 
         auto parseMemberAttributes = [&]()
@@ -2043,7 +2038,7 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
         // is dropped so the function itself still parses.
         auto rejectConstFunction = [&]()
         {
-            if (FFlag::LuwuBetterUserDefinedClasses && lexer.current().type == Lexeme::Name && AstName(lexer.current().name) == "const" &&
+            if (lexer.current().type == Lexeme::Name && AstName(lexer.current().name) == "const" &&
                 lexer.lookahead().type == Lexeme::ReservedFunction)
             {
                 report(lexer.current().location, "Functions in a class are always const; remove 'const' here");
@@ -2053,7 +2048,7 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
 
         rejectConstFunction();
 
-        if (FFlag::LuwuBetterUserDefinedClasses && lexer.current().type == Lexeme::Name && AstName(lexer.current().name) == "const")
+        if (lexer.current().type == Lexeme::Name && AstName(lexer.current().name) == "const")
         {
             const Lexeme& next = lexer.lookahead();
             if (next.type == Lexeme::Name && (AstName(next.name) == "public" || AstName(next.name) == "private"))
@@ -2068,9 +2063,6 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
         // missing field name (rfcs/classes).
         auto qualifierIntroducesMember = [&]()
         {
-            if (!FFlag::LuwuBetterUserDefinedClasses)
-                return true;
-
             Lexeme::Type next = lexer.lookahead().type;
             // An attribute can only introduce a method, so it counts as a member following the
             // specifier: `private @native function ...`.
@@ -2080,11 +2072,10 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
         if (lexer.current().type == Lexeme::Name && AstName(lexer.current().name) == "public" && qualifierIntroducesMember())
         {
             qualifierLocation = lexer.current().location;
-            if (FFlag::LuwuBetterUserDefinedClasses)
-                explicitPublicQualifierLocations.push_back(*qualifierLocation);
+            explicitPublicQualifierLocations.push_back(*qualifierLocation);
             nextLexeme();
         }
-        else if (FFlag::LuwuBetterUserDefinedClasses && lexer.current().type == Lexeme::Name && AstName(lexer.current().name) == "private" &&
+        else if (lexer.current().type == Lexeme::Name && AstName(lexer.current().name) == "private" &&
                  qualifierIntroducesMember())
         {
             qualifierLocation = lexer.current().location;
@@ -2129,17 +2120,16 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
                 continue;
         }
 
-        // If we saw a qualifier _and_ the current token is not `function`,
-        // assume this is a property. Under LuwuBetterUserDefinedClasses, an
-        // unqualified property is allowed too; whether the class needed
-        // qualifiers is checked after the class body.
-        if ((qualifierLocation || FFlag::LuwuBetterUserDefinedClasses) && lexer.current().type != Lexeme::ReservedFunction)
+        // Luwu Classes (rfcs/classes): anything but `function` starts a property, qualified or not
+        // (upstream requires a qualifier here); whether the class needed qualifiers is checked after
+        // the class body.
+        if (lexer.current().type != Lexeme::ReservedFunction)
         {
             std::optional<Location> constLocation;
             bool isConst = false;
             // As with the access specifiers above, `const` is only the modifier when a field name
             // follows it; `const = 1` declares a field named `const`.
-            if (FFlag::LuwuBetterUserDefinedClasses && lexer.current().type == Lexeme::Name && AstName(lexer.current().name) == "const" &&
+            if (lexer.current().type == Lexeme::Name && AstName(lexer.current().name) == "const" &&
                 lexer.lookahead().type == Lexeme::Name)
             {
                 constLocation = lexer.current().location;
@@ -2150,54 +2140,50 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
             std::optional<Name> propName = parseNameOpt("class field name");
             if (!propName)
             {
-                if (FFlag::LuwuBetterUserDefinedClasses)
-                    nextLexeme(); // skip the unexpected token to avoid an infinite loop
+                nextLexeme(); // skip the unexpected token to avoid an infinite loop
                 continue;
             }
 
-            if (FFlag::LuwuBetterUserDefinedClasses && isDisallowedClassMemberName(propName->name))
+            if (isDisallowedClassMemberName(propName->name))
                 report(propName->location, "Fields are not allowed to be named '%s'", propName->name.value);
 
-            if (FFlag::LuwuBetterUserDefinedClasses && !qualifierLocation)
+            if (!qualifierLocation)
                 unqualifiedMemberLocations.push_back({propName->location, /* isFunction */ false});
 
             // Luwu Classes (rfcs/classes): restating a primary constructor parameter's field in the
             // body is how an *unqualified* parameter gets its access specifier. A parameter that already
             // has one can be restated, but not contradicted: with `public text` in the header and
             // `private text` in the body, a reader couldn't trust either.
-            if (FFlag::LuwuBetterUserDefinedClasses)
+            if (int paramIndex = findPrimaryConstructorParam(propName->name); paramIndex >= 0)
             {
-                if (int paramIndex = findPrimaryConstructorParam(propName->name); paramIndex >= 0)
+                const AstClassPrimaryConstructorParamQualifiers& param = primaryConstructor->argsQualifiers.data[paramIndex];
+
+                if (qualifierLocation)
+                    paramsQualifiedInBody.insert(propName->name);
+
+                if (param.qualifierLocation && qualifierLocation && param.visibility != visibility)
                 {
-                    const AstClassPrimaryConstructorParamQualifiers& param = primaryConstructor->argsQualifiers.data[paramIndex];
-
-                    if (qualifierLocation)
-                        paramsQualifiedInBody.insert(propName->name);
-
-                    if (param.qualifierLocation && qualifierLocation && param.visibility != visibility)
-                    {
-                        // Do not inline these into the report call: MSVC miscompiles inlined ternaries
-                        // feeding %s in Windows Debug CI (see the identical note further down).
-                        const char* declared = param.visibility == AstClassMemberVisibility::Private ? "private" : "public";
-                        const char* restated = visibility == AstClassMemberVisibility::Private ? "private" : "public";
-                        report(
-                            propName->location,
-                            "Field '%s' was explicitly marked as %s on line %d, cannot reassign it as %s",
-                            propName->name.value,
-                            declared,
-                            param.qualifierLocation->begin.line + 1,
-                            restated
-                        );
-                    }
-
-                    if (param.isConst && !isConst)
-                        report(
-                            propName->location,
-                            "Field '%s' was explicitly marked as const on line %d, cannot reassign it as mutable",
-                            propName->name.value,
-                            param.constLocation->begin.line + 1
-                        );
+                    // Do not inline these into the report call: MSVC miscompiles inlined ternaries
+                    // feeding %s in Windows Debug CI (see the identical note further down).
+                    const char* declared = param.visibility == AstClassMemberVisibility::Private ? "private" : "public";
+                    const char* restated = visibility == AstClassMemberVisibility::Private ? "private" : "public";
+                    report(
+                        propName->location,
+                        "Field '%s' was explicitly marked as %s on line %d, cannot reassign it as %s",
+                        propName->name.value,
+                        declared,
+                        param.qualifierLocation->begin.line + 1,
+                        restated
+                    );
                 }
+
+                if (param.isConst && !isConst)
+                    report(
+                        propName->location,
+                        "Field '%s' was explicitly marked as const on line %d, cannot reassign it as mutable",
+                        propName->name.value,
+                        param.constLocation->begin.line + 1
+                    );
             }
 
             AstType* propType = nullptr;
@@ -2212,7 +2198,7 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
 
             std::optional<Location> equalsLocation;
             AstExpr* defaultValue = nullptr;
-            if (FFlag::LuwuBetterUserDefinedClasses && lexer.current().type == '=')
+            if (lexer.current().type == '=')
             {
                 equalsLocation = lexer.current().location;
                 nextLexeme();
@@ -2242,7 +2228,7 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
                 report(propName->location, "Class fields cannot start with '__'");
 
             bool hasSemicolon = false;
-            if (FFlag::LuwuBetterUserDefinedClasses && lexer.current().type == ';')
+            if (lexer.current().type == ';')
             {
                 nextLexeme();
                 hasSemicolon = true;
@@ -2275,7 +2261,7 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
                 );
             }
         }
-        else if (lexer.current().type == Lexeme::ReservedFunction)
+        else
         {
             auto matchFunction = lexer.current();
             nextLexeme();
@@ -2309,7 +2295,7 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
 
             matchRecoveryStopOnToken[Lexeme::ReservedEnd]--;
 
-            if (FFlag::LuwuBetterUserDefinedClasses && isDisallowedClassMemberName(name.name))
+            if (isDisallowedClassMemberName(name.name))
                 report(name.location, "Functions are not allowed to be named '%s'", name.name.value);
 
             if (body->args.size > 0 && body->args.data[0]->name == "self" && body->args.data[0]->annotation != nullptr)
@@ -2317,7 +2303,7 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
 
             if (strncmp(name.name.value, "__", 2) == 0)
             {
-                if (FFlag::LuwuBetterUserDefinedClasses && name.name == "__init")
+                if (name.name == "__init")
                 {
                     // The primary constructor already defines this class's `__init`.
                     if (primaryConstructor)
@@ -2341,7 +2327,7 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
             }
 
             bool hasSemicolon = false;
-            if (FFlag::LuwuBetterUserDefinedClasses && lexer.current().type == ';')
+            if (lexer.current().type == ';')
             {
                 // used by linter to explicitly ignore SameLineStatement with class prop decls
                 nextLexeme();
@@ -2356,7 +2342,7 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
             {
                 classMemberNamespace.insert(name.name);
 
-                if (FFlag::LuwuBetterUserDefinedClasses && !qualifierLocation)
+                if (!qualifierLocation)
                     unqualifiedMemberLocations.push_back({name.location, /* isFunction */ true});
 
                 declarations.push_back(
@@ -2372,11 +2358,6 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
                 );
             }
         }
-        else
-        {
-            report(lexer.current().location, "Only class fields and functions can be declared within a class");
-            nextLexeme(); // skip the unexpected token to avoid an infinite loop
-        }
     }
 
     // Luwu Classes (rfcs/classes): access specifiers are all-or-nothing within a class.
@@ -2387,7 +2368,7 @@ LUAU_NOINLINE AstStat* Parser::parseClassStat(const Location& start, bool export
     //
     // The primary constructor's own specifier (`class PositiveNumber private (...)`) makes the
     // constructor private. It isn't a member's specifier, so it doesn't count here.
-    if (FFlag::LuwuBetterUserDefinedClasses && (sawPrivateMember || sawQualifiedParam || !explicitPublicQualifierLocations.empty()))
+    if ((sawPrivateMember || sawQualifiedParam || !explicitPublicQualifierLocations.empty()))
     {
         if (sawPrivateMember || sawQualifiedParam)
         {
@@ -2878,7 +2859,7 @@ AstExprError* Parser::reportLValueError(AstExpr* expr)
         AstExprLocal* local = expr->as<AstExprLocal>();
         return reportExprError(expr->location, copy({expr}), "Variable '%s' is constant and may not be reassigned", local->local->name.value);
     }
-    if (FFlag::DebugLuauUserDefinedClasses)
+    if (FFlag::LuwuClasses)
     {
         if (AstStatClass* classStat = getMatchingClass(expr))
         {
@@ -3033,7 +3014,7 @@ AstStat* Parser::parseExportValue(
     }
     else if (lexer.current().type == Lexeme::Name && AstName(lexer.current().name) == "class")
     {
-        if (!FFlag::DebugLuauUserDefinedClasses)
+        if (!FFlag::LuwuClasses)
             return reportStatError(start, {}, {}, "%s", kClassesDisabledError);
 
         Location classKeywordLocation = lexer.current().location;

@@ -543,7 +543,7 @@ struct BytecodeGraphSerializer
             break;
 
         case LOP_NEWCLASSMEMBER:
-            LUAU_ASSERT(FFlag::DebugLuauUserDefinedClasses);
+            LUAU_ASSERT(FFlag::LuwuClasses);
             bcb.emitABC(LOP_NEWCLASSMEMBER, getRegInput(insn, 0), 0, getRegInput(insn, 1));
             bcb.emitAux(getVmConstInputAux(insn, 2));
             break;

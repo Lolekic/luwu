@@ -4,9 +4,7 @@ Status: Implemented (Flagged)
 
 FFlags:
 
-- LuwuBetterUserDefinedClasses
-- DebugLuauUserDefinedClasses
-- DebugLuauUserDefinedClassesRuntime
+- LuwuClasses
 - LuwuGenericNominals (classes with generic parameters share the same type system mechanisms as extern types)
 
 Optional FFlags:

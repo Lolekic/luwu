@@ -1077,7 +1077,7 @@ AstStatClass::AstStatClass(
     , primaryConstructor(primaryConstructor)
     , keywordLocation(keywordLocation)
 {
-    LUAU_ASSERT(FFlag::DebugLuauUserDefinedClasses);
+    LUAU_ASSERT(FFlag::LuwuClasses);
 
     // Luwu Classes (rfcs/classes): upstream Luau is designing its own class syntax, and we don't know what
     // it will settle on, so every class declaration counts as Luwu-only.
@@ -1086,7 +1086,7 @@ AstStatClass::AstStatClass(
 
 void AstStatClass::visit(AstVisitor* visitor)
 {
-    LUAU_ASSERT(FFlag::DebugLuauUserDefinedClasses);
+    LUAU_ASSERT(FFlag::LuwuClasses);
     if (visitor->visit(this))
     {
         for (AstGenericType* generic : generics)

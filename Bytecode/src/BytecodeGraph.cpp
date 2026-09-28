@@ -9,7 +9,7 @@
 #include <unordered_set>
 #include <algorithm>
 
-LUAU_FASTFLAG(DebugLuauUserDefinedClasses)
+LUAU_FASTFLAG(LuwuClasses)
 
 namespace Luau
 {

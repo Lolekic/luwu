@@ -17,7 +17,7 @@ using namespace Luau;
 using namespace Luau::Bytecode;
 
 LUAU_FASTFLAG(LuauEmitCallFeedback)
-LUAU_FASTFLAG(LuwuBetterUserDefinedClasses)
+LUAU_FASTFLAG(LuwuClasses)
 
 namespace
 {
@@ -1001,8 +1001,7 @@ TEST_CASE_FIXTURE(BytecodeCompilerFixture, "bytecode_roundtrip")
 TEST_CASE_FIXTURE(BytecodeCompilerFixture, "classes_bytecode_roundtrips")
 {
 
-    ScopedFastFlag _{FFlag::DebugLuauUserDefinedClasses, true};
-    ScopedFastFlag better{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag _{FFlag::LuwuClasses, true};
 
     checkRoundtrip(R"(
         class Point
@@ -1075,8 +1074,7 @@ static bool isProjection(CompTimeBcFunction& fn, BcOp op, BcOp of, uint32_t inde
 
 TEST_CASE_FIXTURE(BytecodeCompilerFixture, "classes_newobject_registers")
 {
-    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
-    ScopedFastFlag better{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     auto fn = buildBytecode(kClassConstructionSource, 0, 1);
     REQUIRE(fn);
@@ -1138,8 +1136,7 @@ TEST_CASE_FIXTURE(BytecodeCompilerFixture, "classes_newobject_registers")
 
 TEST_CASE_FIXTURE(BytecodeCompilerFixture, "classes_declaration_roundtrips")
 {
-    ScopedFastFlag classes{FFlag::DebugLuauUserDefinedClasses, true};
-    ScopedFastFlag better{FFlag::LuwuBetterUserDefinedClasses, true};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     // the module: class shapes (with a constant default) and NEWCLASSMEMBER
     auto fn = buildBytecode(kClassConstructionSource, 0, 3);

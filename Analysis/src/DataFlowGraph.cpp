@@ -12,7 +12,7 @@
 
 LUAU_FASTFLAG(DebugLuauFreezeArena)
 LUAU_FASTFLAG(LuauSolverV2)
-LUAU_FASTFLAG(DebugLuauUserDefinedClasses)
+LUAU_FASTFLAG(LuwuClasses)
 LUAU_FASTFLAGVARIABLE(LuauDoNotOverwriteAstDefs)
 LUAU_FASTFLAGVARIABLE(LuauAvoidTrivialPhis)
 LUAU_FASTFLAG(LuwuDefaultArguments)
@@ -464,7 +464,7 @@ ControlFlow DataFlowGraphBuilder::visit(AstStat* s)
         return visit(d);
     else if (auto d = s->as<AstStatClass>())
     {
-        LUAU_ASSERT(FFlag::DebugLuauUserDefinedClasses);
+        LUAU_ASSERT(FFlag::LuwuClasses);
         return visit(d);
     }
     else if (auto error = s->as<AstStatError>())
@@ -883,7 +883,7 @@ ControlFlow DataFlowGraphBuilder::visit(AstStatDeclareExternType* d)
 
 ControlFlow DataFlowGraphBuilder::visit(AstStatClass* d)
 {
-    LUAU_ASSERT(FFlag::DebugLuauUserDefinedClasses);
+    LUAU_ASSERT(FFlag::LuwuClasses);
     DefId def = defArena->freshCell(d->name, d->name->location);
 
     graph.localDefs[d->name] = def;

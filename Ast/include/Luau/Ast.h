@@ -14,7 +14,7 @@
 #include <string.h>
 #include <stdint.h>
 
-LUAU_FASTFLAG(DebugLuauUserDefinedClasses)
+LUAU_FASTFLAG(LuwuClasses)
 
 namespace Luau
 {
@@ -1826,7 +1826,7 @@ public:
     }
     virtual bool visit(class AstStatClass* node)
     {
-        LUAU_ASSERT(FFlag::DebugLuauUserDefinedClasses);
+        LUAU_ASSERT(FFlag::LuwuClasses);
         return visit(static_cast<AstStat*>(node));
     }
     virtual bool visit(class AstStatDeclareExternType* node)

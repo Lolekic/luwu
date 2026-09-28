@@ -18,8 +18,7 @@
 LUAU_DYNAMIC_FASTINT(LuauSubtypingRecursionLimit)
 
 LUAU_FASTINT(LuauTypeInferRecursionLimit)
-LUAU_FASTFLAG(DebugLuauUserDefinedClasses)
-LUAU_FASTFLAG(LuwuBetterUserDefinedClasses)
+LUAU_FASTFLAG(LuwuClasses)
 LUAU_FASTFLAG(LuauExportValueSyntax)
 LUAU_FASTFLAG(LuauExportValueTypecheck)
 LUAU_FASTFLAG(LuauAutocompleteFunctionArglistSuggestion)
@@ -1036,7 +1035,7 @@ TEST_CASE_FIXTURE(ACFixture, "autocomplete_end_with_lambda")
 
 TEST_CASE_FIXTURE(ACFixture, "autocomplete_end_inside_class_method")
 {
-    ScopedFastFlag sff{FFlag::DebugLuauUserDefinedClasses, true};
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     check(R"(
         class Foo
@@ -1052,10 +1051,7 @@ TEST_CASE_FIXTURE(ACFixture, "autocomplete_end_inside_class_method")
 
 TEST_CASE_FIXTURE(ACFixture, "autocomplete_class_member_position_offers_qualifiers")
 {
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
-    };
+    ScopedFastFlag luwuClasses{FFlag::LuwuClasses, true};
 
     check(R"(
         class Foo
@@ -1071,29 +1067,10 @@ TEST_CASE_FIXTURE(ACFixture, "autocomplete_class_member_position_offers_qualifie
     CHECK_EQ(ac.entryMap.count("local"), 0);
 }
 
-TEST_CASE_FIXTURE(ACFixture, "autocomplete_class_member_position_hides_private_without_flag")
-{
-    ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, false},
-    };
-
-    check(R"(
-        class Foo
-            @1
-        end
-    )");
-
-    auto ac = autocomplete('1');
-    CHECK_EQ(ac.entryMap.count("public"), 1);
-    CHECK_EQ(ac.entryMap.count("private"), 0);
-}
-
 TEST_CASE_FIXTURE(ACBuiltinsFixture, "autocomplete_offers_private_class_members_only_inside_their_class")
 {
     ScopedFastFlag sffs[] = {
-        {FFlag::DebugLuauUserDefinedClasses, true},
-        {FFlag::LuwuBetterUserDefinedClasses, true},
+        {FFlag::LuwuClasses, true},
         {FFlag::LuauExportValueSyntax, true},
         {FFlag::LuauExportValueTypecheck, true},
     };
@@ -5438,7 +5415,7 @@ TEST_CASE_FIXTURE(ACFixture, "we_know_the_fields_of_a_class_instance")
 {
     ScopedFastFlag sffs[] = {
         {FFlag::DebugLuauForceOldSolver, false},
-        {FFlag::DebugLuauUserDefinedClasses, true},
+        {FFlag::LuwuClasses, true},
     };
 
     check(R"(
@@ -5702,7 +5679,7 @@ TEST_CASE_FIXTURE(ACFixture, "ac_static_method_autocomplete")
 {
     ScopedFastFlag sffs[] = {
         {FFlag::DebugLuauForceOldSolver, false},
-        {FFlag::DebugLuauUserDefinedClasses, true},
+        {FFlag::LuwuClasses, true},
     };
 
     check(R"(
@@ -5724,7 +5701,7 @@ TEST_CASE_FIXTURE(ACFixture, "class_autocomplete_classname_inside_method")
 {
     ScopedFastFlag sffs[] = {
         {FFlag::DebugLuauForceOldSolver, false},
-        {FFlag::DebugLuauUserDefinedClasses, true},
+        {FFlag::LuwuClasses, true},
     };
 
     check(R"(
@@ -5769,7 +5746,7 @@ TEST_CASE_FIXTURE(ACFixture, "class_autocomplete_classname_inside_method")
 {
     ScopedFastFlag sffs[] = {
         {FFlag::DebugLuauForceOldSolver, false},
-        {FFlag::DebugLuauUserDefinedClasses, true},
+        {FFlag::LuwuClasses, true},
     };
 
     check(R"(

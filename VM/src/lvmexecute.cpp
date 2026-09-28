@@ -18,11 +18,12 @@
 
 #include <string.h>
 
+LUAU_FASTFLAG(LuwuClasses)
+
 LUAU_FASTFLAGVARIABLE(LuauDirectFieldGet)
 LUAU_FLAGVERSION(LuauDirectFieldGet, 3)
 
 LUAU_FASTFLAGVARIABLE(LuauCIProto)
-LUAU_FASTFLAGVARIABLE(DebugLuauUserDefinedClassesRuntime)
 LUAU_FASTFLAGVARIABLE(LuauCallFeedback)
 LUAU_FASTFLAGVARIABLE(LuauYieldIter2)
 LUAU_FASTFLAGVARIABLE(LuauPromoteProto)
@@ -665,7 +666,7 @@ reentry:
 
                         // fall through to slow path
                     }
-                    else if (LUAU_UNLIKELY(FFlag::DebugLuauUserDefinedClassesRuntime && ttisobject(rb)))
+                    else if (LUAU_UNLIKELY(FFlag::LuwuClasses && ttisobject(rb)))
                     {
                         // fast-path: the "hash line" is an offset that points
                         // to the class member with the same name.
@@ -691,7 +692,7 @@ reentry:
                             VM_NEXT();
                         }
                     }
-                    else if (LUAU_UNLIKELY(FFlag::DebugLuauUserDefinedClassesRuntime && ttisclass(rb)))
+                    else if (LUAU_UNLIKELY(FFlag::LuwuClasses && ttisclass(rb)))
                     {
                         // fast-path: the "hash line" is an offset that points to the static class
                         // member with the same name (classes are const, so this never goes stale)
@@ -798,7 +799,7 @@ reentry:
                         VM_PATCH_C(pc - 2, L->cachedslot);
                         VM_NEXT();
                     }
-                    else if (LUAU_UNLIKELY(FFlag::DebugLuauUserDefinedClassesRuntime && ttisobject(rb)))
+                    else if (LUAU_UNLIKELY(FFlag::LuwuClasses && ttisobject(rb)))
                     {
                         // fast-path: the "hash line" is an offset that points to the instance field
                         // with the same name. Only instance members (offset < numberofinstancemembers)
@@ -1059,7 +1060,7 @@ reentry:
                             luaG_methoderror(L, ra + 1, tsvalue(kv));
                     }
                 }
-                else if (LUAU_UNLIKELY(FFlag::DebugLuauUserDefinedClassesRuntime && ttisobject(rb)))
+                else if (LUAU_UNLIKELY(FFlag::LuwuClasses && ttisobject(rb)))
                 {
                     // Objects are dispatched on their own: they don't use L->global->mt[ttype]
                     // like userdata/vectors do (each class has its own instancemetatable), and
@@ -2679,7 +2680,7 @@ reentry:
                 VM_CASE_INSTRUCTION insn = *pc++;
                 VM_CASE_STKID ra = VM_REG(LUAU_INSN_A(insn));
 
-                if (FFlag::DebugLuauUserDefinedClassesRuntime)
+                if (FFlag::LuwuClasses)
                 {
                     // If this is a function it will be called
                     // during FORGLOOP
