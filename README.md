@@ -18,20 +18,15 @@ Luwu is an embeddable programming language, but it also comes with two command-l
 
 `luwu` is a command-line REPL and can also run input files. Note that REPL runs in a sandboxed environment and as such doesn't have access to the underlying file system except for ability to `require` modules.
 
-`luwu-analyze` is a command-line type checker and linter; given a set of input files, it produces errors/warnings according to the file configuration, which can be customized by using `--!` comments in the files or [`.luaurc`](https://rfcs.luau.org/config-luaurc) files. For details, please refer to our [type checking](https://luau.org/typecheck) and [linting](https://luau.org/lint) documentation. Globals that a host provides (a runtime like seal or lune, or your own embedder) can be loaded from a definition file with `--defs=<path>`, which can be repeated. Our community maintains a language server frontend for `luwu-analyze` called [luwu-lsp](https://github.com/luwu-community/luwu-lsp) for use with text editors.
+`luwu-analyze` is a command-line type checker and linter; given a set of input files, it produces errors/warnings according to the file configuration.
+
+Analysis configuration can can be customized by using `--!` hotcomments or [`.luaurc`](https://rfcs.luau.org/config-luaurc) files. For details, please refer to upstream's [type checking](https://luau.org/typecheck) and [linting](https://luau.org/lint) documentation, although we have extra lints that upstream doesn't have.
+
+Luwu has extended `luwu-analyze` with support for Luwu definition files. Globals that a host provides can be loaded from a definition file with `--defs=<path>`, which can be repeated.
+
+To use Luwu in your editor as a language server, you should install [luwu-lsp](https://github.com/luwu-community/luwu-lsp) and its Luwu extension. Right now `luwu-lsp` only has a VSIX extension, but it should be similarly portable as Luau Language Server to other editors.
 
 ## Installation
-
-<!-- You can install and run Luwu by downloading the compiled binaries from [a recent release](https://github.com/mluau/luwu/releases); note that `luwu` and `luwu-analyze` binaries from the archives will need to be added to PATH or copied to a directory like `/usr/local/bin` on Linux/macOS.
-
-Alternatively, upstream Luau is available from the packaged distributions below. These packages are not maintained by the Luwu development team and may not match Luwu's Luau 0.730 compatibility baseline:
-
-- macOS: [Install Homebrew](https://docs.brew.sh/Installation) and run `brew install luau`
-- Arch Linux: Luau has been added to the official Arch Linux packages repository under the extras repository (see [``luau``](https://archlinux.org/packages/extra/x86_64/luau/)), simply install using ``pacman``: ``pacman -Syu luau``
-- Alpine Linux: [Enable community repositories](https://wiki.alpinelinux.org/w/index.php?title=Enable_Community_Repository) and run `apk add luau`
-- Gentoo Linux: Luau is [officially packaged by Gentoo](https://packages.gentoo.org/packages/dev-lang/luau) and can be installed using `emerge dev-lang/luau`. You may have to unmask the package first before installing it (which can be done by including the `--autounmask=y` option in the `emerge` command).
-
-After installing, you will want to validate the installation was successful by running the test case [here](https://luau.org/getting-started). -->
 
 Right now you need to build Luwu from source.
 
