@@ -5578,7 +5578,7 @@ TEST_CASE("ClassesFuzz")
     std::string cli = LUWU_REPL_CLI_PATH;
     struct stat st;
     if (stat(cli.c_str(), &st) != 0)
-        FAIL("luwu CLI not found at " << cli << "; build it (the Makefile's luwu-tests and CMake's Luau.Conformance already do)");
+        FAIL("luwu CLI not found at " << cli << "; build it (the Makefile's luwu-tests and CMake's Luwu.Conformance already do)");
 
     const char* sealEnv = std::getenv("LUWU_SEAL");
     std::string seal = sealEnv && *sealEnv ? sealEnv : "seal";

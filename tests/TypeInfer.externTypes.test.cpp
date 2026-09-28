@@ -29,7 +29,7 @@ LUAU_FASTFLAG(LuauAllowIntersectionOfOneTableWithExtern)
 
 TEST_SUITE_BEGIN("TypeInferExternTypes");
 
-TEST_CASE_FIXTURE(ExternTypeFixture, "Luau.Analyze.CLI_crashes_on_this_test")
+TEST_CASE_FIXTURE(ExternTypeFixture, "Luwu.Analyze.CLI_crashes_on_this_test")
 {
     CheckResult result = check(R"(
         local CircularQueue = {}

@@ -5,8 +5,8 @@
 // all fflags, then the extra conformance configurations CI runs (.github/workflows/build.yml). libtest
 // would run them in parallel and in alphabetical order, which puts "all fflags" before "no fflags".
 //
-// Suites mirror the CMake test targets: `unit` (Luau.UnitTest), `conformance` (Luau.Conformance, the VM
-// tests) and `cli` (Luau.CLI.Test). On Linux/macOS the Makefile links all of them into one `luwu-tests`
+// Suites mirror the CMake test targets: `unit` (Luwu.UnitTest), `conformance` (Luwu.Conformance, the VM
+// tests) and `cli` (Luwu.CLI.Test). On Linux/macOS the Makefile links all of them into one `luwu-tests`
 // binary, so each suite is selected there with doctest's `-ts`/`-tse` test-suite filters instead.
 //
 // Filtering works like libtest: `cargo test -- unit`, `cargo test -- "no fflags"`, `--exact`, `--skip`,
@@ -61,9 +61,9 @@ impl Suite {
     #[cfg(windows)]
     fn cmake_target(self) -> &'static str {
         match self {
-            Suite::Unit => "Luau.UnitTest",
-            Suite::Conformance => "Luau.Conformance",
-            Suite::Cli => "Luau.CLI.Test",
+            Suite::Unit => "Luwu.UnitTest",
+            Suite::Conformance => "Luwu.Conformance",
+            Suite::Cli => "Luwu.CLI.Test",
         }
     }
 }

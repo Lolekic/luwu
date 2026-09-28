@@ -112,27 +112,27 @@ jobs:
     - name: cmake configure
       run: cmake . -A ${{matrix.arch}} -DLUAU_WERROR=ON -DLUAU_NATIVE=ON
     - name: cmake build
-      run: cmake --build . --target Luau.UnitTest Luau.Conformance --config Debug
+      run: cmake --build . --target Luwu.UnitTest Luwu.Conformance --config Debug
     - name: run tests
       shell: bash # necessary for fail-fast
       run: |
-        Debug/Luau.UnitTest.exe
-        Debug/Luau.Conformance.exe
-        Debug/Luau.UnitTest.exe --fflags=true
-        Debug/Luau.Conformance.exe --fflags=true
+        Debug/Luwu.UnitTest.exe
+        Debug/Luwu.Conformance.exe
+        Debug/Luwu.UnitTest.exe --fflags=true
+        Debug/Luwu.Conformance.exe --fflags=true
     - name: run extra conformance tests
       shell: bash # necessary for fail-fast
       run: |
-        Debug/Luau.Conformance.exe -O2
-        Debug/Luau.Conformance.exe -O2 --fflags=true
-        Debug/Luau.Conformance.exe --codegen
-        Debug/Luau.Conformance.exe --codegen --fflags=true
-        Debug/Luau.Conformance.exe --codegen -O2
-        Debug/Luau.Conformance.exe --codegen -O2 --fflags=true
+        Debug/Luwu.Conformance.exe -O2
+        Debug/Luwu.Conformance.exe -O2 --fflags=true
+        Debug/Luwu.Conformance.exe --codegen
+        Debug/Luwu.Conformance.exe --codegen --fflags=true
+        Debug/Luwu.Conformance.exe --codegen -O2
+        Debug/Luwu.Conformance.exe --codegen -O2 --fflags=true
     - name: cmake cli
       shell: bash # necessary for fail-fast
       run: |
-        cmake --build . --target Luau.Repl.CLI Luau.Analyze.CLI Luau.Compile.CLI --config Debug # match config with tests to improve build time
+        cmake --build . --target Luwu.Repl.CLI Luwu.Analyze.CLI Luwu.Compile.CLI --config Debug # match config with tests to improve build time
         Debug/luwu tests/conformance/assert.luau
         Debug/luwu-analyze tests/conformance/assert.luau
         Debug/luwu-compile tests/conformance/assert.luau
@@ -173,4 +173,4 @@ jobs:
       run: |
         source emsdk/emsdk_env.sh
         emcmake cmake . -DLUAU_BUILD_WEB=ON -DCMAKE_BUILD_TYPE=Release
-        make -j2 Luau.Web
+        make -j2 Luwu.Web

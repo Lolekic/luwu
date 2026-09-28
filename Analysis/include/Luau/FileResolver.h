@@ -70,7 +70,7 @@ struct RequireNode
         return {};
     }
 
-    // Resolve a path relative to the current node. The Luau.Require library
+    // Resolve a path relative to the current node. The Luwu.Require library
     // provides utilities that can help with implementing this logic.
     virtual std::unique_ptr<RequireNode> resolvePathToNode(const std::string& path) const = 0;
 

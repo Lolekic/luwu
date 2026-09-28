@@ -105,7 +105,7 @@ public:
     IrBuilder build;
     AssemblyOptions options;
 
-    // Luau.VM headers are not accessible
+    // Luwu.VM headers are not accessible
     int tnil = parseTagName("tnil");
     int tboolean = parseTagName("tboolean");
     int tnumber = parseTagName("tnumber");

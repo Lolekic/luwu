@@ -46,8 +46,8 @@ On all platforms, you can use CMake to run the following commands to build Luwu 
 ```sh
 mkdir cmake && cd cmake
 cmake .. -DCMAKE_BUILD_TYPE=RelWithDebInfo
-cmake --build . --target Luau.Repl.CLI --config RelWithDebInfo
-cmake --build . --target Luau.Analyze.CLI --config RelWithDebInfo
+cmake --build . --target Luwu.Repl.CLI --config RelWithDebInfo
+cmake --build . --target Luwu.Analyze.CLI --config RelWithDebInfo
 ```
 
 Alternatively, on Linux and macOS, you can also use `make`:
@@ -56,7 +56,7 @@ Alternatively, on Linux and macOS, you can also use `make`:
 make config=release luwu luwu-analyze
 ```
 
-To integrate Luwu into your CMake application projects as a library, at the minimum, you'll need to depend on the `Luau.Compiler` and `Luau.VM` projects. From there you need to create a new state (using a Lua 5.x API such as `lua_newstate`), compile source to bytecode, and load it into the VM like this:
+To integrate Luwu into your CMake application projects as a library, at the minimum, you'll need to depend on the `Luwu.Compiler` and `Luwu.VM` projects. From there you need to create a new state (using a Lua 5.x API such as `lua_newstate`), compile source to bytecode, and load it into the VM like this:
 
 ```cpp
 // needs lua.h and luacode.h
@@ -75,7 +75,7 @@ To gain advantage of many performance improvements, it's highly recommended to u
 
 ## Testing
 
-Luwu has an internal test suite; in CMake builds, it is split into two targets, `Luau.UnitTest` (for the bytecode compiler and type checker/linter tests) and `Luau.Conformance` (for the VM tests). The unit tests are written in C++, whereas the conformance tests are largely written in Luwu (see `tests/conformance`).
+Luwu has an internal test suite; in CMake builds, it is split into two targets, `Luwu.UnitTest` (for the bytecode compiler and type checker/linter tests) and `Luwu.Conformance` (for the VM tests). The unit tests are written in C++, whereas the conformance tests are largely written in Luwu (see `tests/conformance`).
 
 Makefile builds combine both into a single target that can be run via `make test`.
 

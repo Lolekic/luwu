@@ -47,7 +47,7 @@ fn extract_make_source(line: &str) -> Option<String> {
 }
 
 /// Extracts the source file from a `cmake --build` line like
-/// `Building CXX object VM/CMakeFiles/Luau.VM.dir/src/lgc.cpp.o`.
+/// `Building CXX object VM/CMakeFiles/Luwu.VM.dir/src/lgc.cpp.o`.
 fn extract_cmake_source(line: &str) -> Option<String> {
     if !line.starts_with("Building") {
         return None;
@@ -147,9 +147,9 @@ fn main() {
             .arg("--config")
             .arg(build_type)
             .arg("--target")
-            .arg("Luau.Repl.CLI")
+            .arg("Luwu.Repl.CLI")
             .arg("--target")
-            .arg("Luau.Analyze.CLI")
+            .arg("Luwu.Analyze.CLI")
             .arg("-j")
             .arg(&jobs)
             .stdout(Stdio::piped())
