@@ -665,7 +665,7 @@ local function memcmp()
 
     assert(buffer.memcmp(
         buffer.fromstring("xxmess"),
-        buffer.fromstring("yyyymessKK"),
+        buffer.fromstring("yyyymessZZ"),
         2,
         4
     ) == 0)

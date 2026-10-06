@@ -7,6 +7,7 @@ LUAU_FASTFLAG(LuauAllowGlobalDeclarationToBeCalledClass)
 LUAU_FASTFLAG(LuwuClasses)
 LUAU_FASTFLAG(LuauUdtfTypeIsSubtypeOf)
 LUAU_FASTFLAG(LuwuBufferIsFrozen)
+LUAU_FASTFLAG(LuwuBufferMemcmp)
 LUAU_FASTFLAG(LuwuTableDrop)
 
 namespace Luau
@@ -252,7 +253,6 @@ declare buffer: {
     tostring: @checked (b: buffer) -> string,
     len: @checked (b: buffer) -> number,
     copy: @checked (target: buffer, targetOffset: number, source: buffer, sourceOffset: number?, count: number?) -> (),
-    memcmp: @checked (b1: buffer, b2: buffer, offset1: number?, offset2: number?, count: number?) -> number,
     fill: @checked (b: buffer, offset: number, value: number, count: number?) -> (),
     readi8: @checked (b: buffer, offset: number) -> number,
     readu8: @checked (b: buffer, offset: number) -> number,
@@ -283,6 +283,11 @@ static constexpr const char* kBuiltinDefinitionBufferSrcInteger = R"BUILTIN_SRC(
 
 static constexpr const char* kBuiltinDefinitionBufferSrcIsFrozen = R"BUILTIN_SRC(
     isfrozen: @checked (b: buffer) -> boolean,
+)BUILTIN_SRC";
+
+// Luwu buffer.memcmp (rfcs/buffer-memcmp.md):
+static constexpr const char* kBuiltinDefinitionBufferSrcMemcmp = R"BUILTIN_SRC(
+    memcmp: @checked (b1: buffer, b2: buffer, offset1: number?, offset2: number?, count: number?) -> number,
 )BUILTIN_SRC";
 
 static constexpr const char* kBuiltinDefinitionBufferSrcClose = R"BUILTIN_SRC(
@@ -402,6 +407,8 @@ std::string getBuiltinDefinitionSource()
         result += kBuiltinDefinitionBufferSrcInteger;
     if (FFlag::LuwuBufferIsFrozen)
         result += kBuiltinDefinitionBufferSrcIsFrozen;
+    if (FFlag::LuwuBufferMemcmp)
+        result += kBuiltinDefinitionBufferSrcMemcmp;
     result += kBuiltinDefinitionBufferSrcClose;
 
     result += kBuiltinDefinitionVectorSrc;

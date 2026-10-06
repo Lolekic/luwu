@@ -10,6 +10,7 @@
 
 LUAU_FASTFLAG(LuauIntegerLibrary)
 LUAU_FASTFLAGVARIABLE(LuwuBufferIsFrozen)
+LUAU_FASTFLAGVARIABLE(LuwuBufferMemcmp)
 
 #include <string.h>
 
@@ -279,6 +280,7 @@ static int buffer_copy(lua_State* L)
     return 0;
 }
 
+// Luwu buffer.memcmp (rfcs/buffer-memcmp.md):
 static int buffer_memcmp(lua_State* L)
 {
     size_t b1len = 0;
@@ -432,7 +434,6 @@ static const luaL_Reg bufferlib[] = {
     {"writestring", buffer_writestring},
     {"len", buffer_len},
     {"copy", buffer_copy},
-    {"memcmp", buffer_memcmp},
     {"fill", buffer_fill},
     {"readbits", buffer_readbits},
     {"writebits", buffer_writebits},
@@ -465,7 +466,6 @@ static const luaL_Reg bufferlib_NOINTEGER[] = {
     {"writestring", buffer_writestring},
     {"len", buffer_len},
     {"copy", buffer_copy},
-    {"memcmp", buffer_memcmp},
     {"fill", buffer_fill},
     {"readbits", buffer_readbits},
     {"writebits", buffer_writebits},
@@ -483,6 +483,12 @@ int luaopen_buffer(lua_State* L)
     {
         lua_pushcfunction(L, buffer_isfrozen, "isfrozen");
         lua_setfield(L, -2, "isfrozen");
+    }
+
+    if (FFlag::LuwuBufferMemcmp)
+    {
+        lua_pushcfunction(L, buffer_memcmp, "memcmp");
+        lua_setfield(L, -2, "memcmp");
     }
 
     return 1;
