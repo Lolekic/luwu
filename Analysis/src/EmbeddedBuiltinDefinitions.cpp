@@ -252,6 +252,7 @@ declare buffer: {
     tostring: @checked (b: buffer) -> string,
     len: @checked (b: buffer) -> number,
     copy: @checked (target: buffer, targetOffset: number, source: buffer, sourceOffset: number?, count: number?) -> (),
+    memcmp: @checked (b1: buffer, b2: buffer, offset1: number?, offset2: number?, count: number?) -> number,
     fill: @checked (b: buffer, offset: number, value: number, count: number?) -> (),
     readi8: @checked (b: buffer, offset: number) -> number,
     readu8: @checked (b: buffer, offset: number) -> number,
