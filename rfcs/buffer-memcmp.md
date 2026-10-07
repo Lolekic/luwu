@@ -8,12 +8,6 @@ FFlag: LuwuBufferMemcmp
 
 Adds `buffer.memcmp` for comparing byte ranges between two buffers.
 
-It returns:
-
-- `-1` if `b1` is smaller
-- `0` if both compared ranges are equal
-- `1` if `b1` is greater
-
 The implementation uses C `memcmp` internally and normalizes the result **exactly** to `-1`, `0`, or `1`.
 
 ## Motivation
@@ -37,17 +31,38 @@ If `count` is omitted, it defaults to:
 min(buffer.len(b1) - offset1, buffer.len(b2) - offset2)
 ```
 
-The function compares bytes lexicographically and returns **exactly** `-1`, `0`, or `1`.
+The function compares bytes lexicographically and returns **exactly** `-1`, `0`, or `1` where:
+
+- `-1` means the first differing byte in `b1` is smaller than the corresponding byte in `b2`
+
+- `1` means the first differing byte in `b1` is greater than the corresponding byte in `b2`
+
+- `0` means no differing byte was found in the compared range
+
+For example:
+
+```luau
+local a = buffer.fromstring("abc")
+local b = buffer.fromstring("abd")
+
+-- 'c' (99) is smaller than 'd' (100)
+assert(buffer.memcmp(a, b) == -1)
+
+-- Reversing the arguments reverses the ordering.
+assert(buffer.memcmp(b, a) == 1)
+```
+
+`buffer.memcmp` returns a number instead of a boolean because it provides both equality and ordering information. A boolean could only answer whether the ranges are equal, while `-1` and `1` also indicate which range compares smaller or greater. This is useful for sorting or ordered comparisons.
 
 Invalid offsets, a negative `count` or ranges outside either buffer result in a `buffer access out of bounds` error.
 
-Example:
+### Examples
 
 ```luau
-local a = buffer.fromstring("abcdef")
+local a = buffer.fromstring("abcdeg")
 local b = buffer.fromstring("abcdeg")
 
-assert(buffer.memcmp(a, b) == -1)
+assert(buffer.memcmp(a, b) == 0)
 ```
 
 Ranges can also be compared:
